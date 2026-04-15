@@ -17,25 +17,10 @@
   margin-bottom: 16px;
 }
 
-.eyebrow {
-  margin: 0 0 8px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #6b7280;
-}
-
 .title {
   margin: 0;
   font-size: 20px;
   color: #111827;
-}
-
-.description {
-  margin: 10px 0 0;
-  font-size: 14px;
-  color: #6b7280;
 }
 
 .controls {
@@ -50,7 +35,6 @@
 }
 
 .squareButton {
-  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -61,35 +45,19 @@
   background: #ffffff;
   color: #475569;
   cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
-.squareButton::after,
-.eyeButton::after,
-.removeButton::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  transform: translateX(-50%);
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: #0f172a;
-  color: #ffffff;
-  font-size: 12px;
-  line-height: 1.2;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
-}
-
-.squareButton:hover::after,
-.squareButton:focus-visible::after,
-.eyeButton:hover::after,
-.eyeButton:focus-visible::after,
-.removeButton:hover::after,
-.removeButton:focus-visible::after {
-  opacity: 1;
+.squareButton:hover,
+.squareButton:focus-visible {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
 }
 
 .squareButtonOff {
@@ -274,20 +242,6 @@
 }
 
 .eyeButton {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 0;
-  background: transparent;
-  color: #64748b;
-  cursor: pointer;
-}
-
-.removeButton {
-  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -296,8 +250,60 @@
   border: 0;
   border-radius: 999px;
   background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.eyeButton:hover,
+.eyeButton:focus-visible {
+  background: rgba(148, 163, 184, 0.14);
+  color: #0f172a;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+}
+
+.removeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: #dc2626;
   cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.removeButton:hover,
+.removeButton:focus-visible {
+  background: rgba(220, 38, 38, 0.12);
+  color: #b91c1c;
+  box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.16);
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 9999;
+  transform: translate(-50%, -100%);
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
 }
 
 .markEntity {

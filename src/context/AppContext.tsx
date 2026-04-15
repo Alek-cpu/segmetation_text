@@ -21,6 +21,12 @@ import {
 } from '../utils/marks';
 
 type AppContextValue = {
+  allowedRolesForSegmentation: string[];
+  segmentationProgress: {
+    totalMessages: number;
+    availableMessages: number;
+    markedMessages: number;
+  };
   csvRows: CsvRow[];
   entities: Entity[];
   loading: boolean;
@@ -33,6 +39,8 @@ type AppContextValue = {
   marks: Mark[];
   activeMarkIndex: number | null;
   draftSelection: DraftSelection;
+  isRoleAllowedForSegmentation: (role: string) => boolean;
+  canCreateMarkFromDraftSelection: boolean;
   setCsvRows: (rows: CsvRow[]) => void;
   setEntities: (entities: Entity[]) => void;
   setLoading: (value: boolean) => void;
@@ -59,6 +67,7 @@ type AppContextValue = {
 };
 
 const initialDraftSelection = getEmptyDraftSelection();
+const allowedRolesForSegmentation = ['CUSTOMER', 'OPERATOR'];
 
 const AppContext = createContext<AppContextValue | null>(null);
 
@@ -128,8 +137,104 @@ export function AppProvider({ children }: PropsWithChildren) {
     });
   }, [csvRows]);
 
+  const isRoleAllowedForSegmentation = (role: string) => {
+    return allowedRolesForSegmentation.includes(role);
+  };
+
+  const getAllowedSegmentationBoundsForMark = (markIndex: number) => {
+    const targetMark = marks[markIndex];
+
+    if (!targetMark) {
+      return null;
+    }
+
+    const currentMessageIndices = messageOffsets
+      .map((offset, index) => ({ offset, index }))
+      .filter(({ offset }) => offset.end > targetMark.position.start && offset.start < targetMark.position.finish)
+      .map(({ index }) => index);
+
+    if (currentMessageIndices.length === 0) {
+      return null;
+    }
+
+    let startIndex = currentMessageIndices[0];
+    let finishIndex = currentMessageIndices[currentMessageIndices.length - 1];
+
+    while (startIndex > 0) {
+      const previousRow = csvRows[startIndex - 1];
+
+      if (!previousRow || !isRoleAllowedForSegmentation(previousRow.usertype)) {
+        break;
+      }
+
+      startIndex -= 1;
+    }
+
+    while (finishIndex < csvRows.length - 1) {
+      const nextRow = csvRows[finishIndex + 1];
+
+      if (!nextRow || !isRoleAllowedForSegmentation(nextRow.usertype)) {
+        break;
+      }
+
+      finishIndex += 1;
+    }
+
+    const startOffset = messageOffsets[startIndex];
+    const finishOffset = messageOffsets[finishIndex];
+
+    if (!startOffset || !finishOffset) {
+      return null;
+    }
+
+    return {
+      start: startOffset.start,
+      finish: finishOffset.end,
+    };
+  };
+
+  const canCreateMarkFromDraftSelection = useMemo(() => {
+    if (
+      draftSelection.start === null ||
+      draftSelection.finish === null ||
+      draftSelection.selectedText.trim().length === 0
+    ) {
+      return false;
+    }
+
+    if (draftSelection.messageIds.length === 0) {
+      return false;
+    }
+
+    return draftSelection.messageIds.every((messageId) => {
+      const row = csvRows.find((item) => item.messageid === messageId);
+
+      return row ? isRoleAllowedForSegmentation(row.usertype) : false;
+    });
+  }, [csvRows, draftSelection]);
+
+  const segmentationProgress = useMemo(() => {
+    const totalMessages = csvRows.length;
+    const availableMessages = csvRows.filter((row) => isRoleAllowedForSegmentation(row.usertype)).length;
+    const markedMessageIds = new Set(
+      marks.flatMap((mark) => mark.selectedSegment).filter((messageId) => {
+        const row = csvRows.find((item) => item.messageid === messageId);
+
+        return row ? isRoleAllowedForSegmentation(row.usertype) : false;
+      }),
+    );
+
+    return {
+      totalMessages,
+      availableMessages,
+      markedMessages: markedMessageIds.size,
+    };
+  }, [csvRows, marks]);
+
   const value = useMemo<AppContextValue>(
     () => ({
+      allowedRolesForSegmentation,
+      segmentationProgress,
       csvRows,
       entities,
       loading,
@@ -142,6 +247,8 @@ export function AppProvider({ children }: PropsWithChildren) {
       marks,
       activeMarkIndex,
       draftSelection,
+      isRoleAllowedForSegmentation,
+      canCreateMarkFromDraftSelection,
       setCsvRows,
       setEntities,
       setLoading,
@@ -158,6 +265,11 @@ export function AppProvider({ children }: PropsWithChildren) {
           draftSelection.finish === null ||
           draftSelection.selectedText.trim().length === 0
         ) {
+          return;
+        }
+
+        if (!canCreateMarkFromDraftSelection) {
+          setError('Нельзя создать сегмент: выделение содержит сообщение с недоступной для разметки ролью.');
           return;
         }
 
@@ -221,12 +333,33 @@ export function AppProvider({ children }: PropsWithChildren) {
           return false;
         }
 
+        const allowedBounds = getAllowedSegmentationBoundsForMark(markIndex);
         const normalizedRange = {
           start: Math.min(start, finish),
           finish: Math.max(start, finish),
         };
 
-        if (hasIntersectingRange(marks, normalizedRange, markIndex)) {
+        const constrainedRange = allowedBounds
+          ? {
+              start: Math.max(allowedBounds.start, normalizedRange.start),
+              finish: Math.min(allowedBounds.finish, normalizedRange.finish),
+            }
+          : normalizedRange;
+
+        if (constrainedRange.start >= constrainedRange.finish) {
+          setError('Нельзя изменить границы сегмента: выделение упирается в сообщение с недоступной для разметки ролью.');
+          return false;
+        }
+
+        if (
+          allowedBounds &&
+          (constrainedRange.start !== normalizedRange.start || constrainedRange.finish !== normalizedRange.finish)
+        ) {
+          setError('Нельзя изменить границы сегмента: диапазон не может пересекать сообщения с недоступной для разметки ролью.');
+          return false;
+        }
+
+        if (hasIntersectingRange(marks, constrainedRange, markIndex)) {
           setError('Нельзя изменить границы сегмента: диапазон пересекается с другим mark.');
           return false;
         }
@@ -240,8 +373,8 @@ export function AppProvider({ children }: PropsWithChildren) {
             return {
               ...mark,
               ...buildMarkRangePayload({
-                start: normalizedRange.start,
-                finish: normalizedRange.finish,
+                start: constrainedRange.start,
+                finish: constrainedRange.finish,
                 fullPlainText,
                 messageOffsets,
               }),
@@ -344,6 +477,8 @@ export function AppProvider({ children }: PropsWithChildren) {
       marks,
       activeMarkIndex,
       draftSelection,
+      canCreateMarkFromDraftSelection,
+      segmentationProgress,
     ],
   );
 

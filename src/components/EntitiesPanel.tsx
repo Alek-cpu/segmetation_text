@@ -1,10 +1,11 @@
-import { useState, type ChangeEvent, type UIEvent } from 'react';
+import { useRef, useState, type ChangeEvent, type UIEvent } from 'react';
 import styles from './EntitiesPanel.module.css';
 import { useAppContext } from '../context/AppContext';
 import { useEntitiesList } from '../hooks/useEntitiesList';
 
 export function EntitiesPanel() {
   const { entities, loading, draftSelection, createMarkFromDraftSelection } = useAppContext();
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const { filteredEntities, visibleEntities, hasMore, loadMore } = useEntitiesList({
     entities,
@@ -14,6 +15,11 @@ export function EntitiesPanel() {
 
   const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
+  };
+
+  const handleSearchClear = () => {
+    setSearchQuery('');
+    searchInputRef.current?.focus();
   };
 
   const handleListScroll = (event: UIEvent<HTMLDivElement>) => {
@@ -28,21 +34,30 @@ export function EntitiesPanel() {
   return (
     <aside className={styles.panel}>
       <div className={styles.header}>
-        <p className={styles.eyebrow}>Entities</p>
         <h2 className={styles.title}>Список сущностей</h2>
-        <p className={styles.description}>
-          Левая панель подготовлена под выбор entity для разметки.
-        </p>
       </div>
 
       <label className={styles.search}>
+        <div className={styles.searchField}>
         <input
+          ref={searchInputRef}
           type="text"
           value={searchQuery}
           onChange={handleSearchChange}
           className={styles.searchInput}
           placeholder="Поиск по id или name"
         />
+        {searchQuery ? (
+          <button
+            type="button"
+            className={styles.clearButton}
+            onClick={handleSearchClear}
+            aria-label="Очистить поиск"
+          >
+            ×
+          </button>
+        ) : null}
+        </div>
       </label>
 
       <div className={styles.meta}>
