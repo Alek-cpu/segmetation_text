@@ -67,8 +67,6 @@ type AppContextValue = {
 };
 
 const initialDraftSelection = getEmptyDraftSelection();
-const allowedRolesForSegmentation = ['CUSTOMER', 'OPERATOR'];
-
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: PropsWithChildren) {
@@ -135,6 +133,10 @@ export function AppProvider({ children }: PropsWithChildren) {
 
       return offset;
     });
+  }, [csvRows]);
+
+  const allowedRolesForSegmentation = useMemo(() => {
+    return [...new Set(csvRows.map((row) => row.usertype).filter(Boolean))];
   }, [csvRows]);
 
   const isRoleAllowedForSegmentation = (role: string) => {
