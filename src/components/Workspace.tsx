@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import styles from './Workspace.module.css';
 import { useAppContext } from '../context/AppContext';
 import { buildMessageTextParts } from '../utils/messageMarks';
+import type { MessageTextPart } from '../utils/messageMarks';
 import {
   getDraftSelectionFromDomSelection,
   getEmptyDraftSelection,
@@ -26,6 +27,55 @@ type DeleteOverlayState = {
   top: number;
   left: number;
 };
+
+type TextRenderPart = {
+  part: MessageTextPart;
+  text: string;
+  key: string;
+  showStartBoundary: boolean;
+  showEndBoundary: boolean;
+};
+
+type TextRenderChunk = {
+  type: 'word' | 'space';
+  parts: TextRenderPart[];
+};
+
+function buildWordChunks(parts: MessageTextPart[]): TextRenderChunk[] {
+  const chunks: TextRenderChunk[] = [];
+
+  parts.forEach((part, partIndex) => {
+    const splitTexts = part.text.split(/(\s+)/).filter((text) => text.length > 0);
+    const firstSplitIndex = splitTexts.findIndex((text) => !/^\s+$/.test(text));
+    const lastSplitIndex = splitTexts.reduce((lastIndex, text, splitIndex) => (
+      /^\s+$/.test(text) ? lastIndex : splitIndex
+    ), -1);
+
+    splitTexts.forEach((text, splitIndex) => {
+      const type = /^\s+$/.test(text) ? 'space' : 'word';
+      const renderPart = {
+        part,
+        text,
+        key: `${partIndex}-${splitIndex}-${part.markIndexes.join('-')}`,
+        showStartBoundary: splitIndex === firstSplitIndex,
+        showEndBoundary: splitIndex === lastSplitIndex,
+      };
+      const previousChunk = chunks[chunks.length - 1];
+
+      if (previousChunk?.type === type) {
+        previousChunk.parts.push(renderPart);
+        return;
+      }
+
+      chunks.push({
+        type,
+        parts: [renderPart],
+      });
+    });
+  });
+
+  return chunks;
+}
 
 export function Workspace() {
   const {
@@ -305,7 +355,14 @@ export function Workspace() {
       } satisfies Mark;
     });
   }, [dragState, marks]);
-  const visibleMarks = previewMarks.filter((mark) => !mark.hidden && (!globalHidden || mark.forceVisible));
+  const visibleMarkIndexes = useMemo(() => {
+    return new Set(
+      previewMarks
+        .map((mark, index) => ({ mark, index }))
+        .filter(({ mark }) => !mark.hidden && (!globalHidden || mark.forceVisible))
+        .map(({ index }) => index),
+    );
+  }, [globalHidden, previewMarks]);
 
   const handleMessageDoubleClick = (offset: MessageOffset) => {
     setDraftSelection({
@@ -459,6 +516,96 @@ export function Workspace() {
     setDeleteOverlay(null);
   };
 
+  const renderTextPart = (renderPart: TextRenderPart) => {
+    const { part, text, key, showStartBoundary, showEndBoundary } = renderPart;
+
+    if (!part.isMarked) {
+      return <span key={key}>{text}</span>;
+    }
+
+    const hasStartBoundary = showStartBoundary && part.hasStartBorder && part.startBoundaryMarkIndex !== undefined;
+    const hasEndBoundary = showEndBoundary && part.hasEndBorder && part.endBoundaryMarkIndex !== undefined;
+    const startBoundaryMarkIndex = part.startBoundaryMarkIndex;
+    const endBoundaryMarkIndex = part.endBoundaryMarkIndex;
+
+    return (
+      <span
+        key={key}
+        className={[
+          styles.markedText,
+          part.isActive ? styles.markedTextActive : '',
+          (part.overlapCount ?? 0) > 1 ? styles.markedTextOverlap : '',
+          hasStartBoundary ? styles.markedTextStart : '',
+          hasEndBoundary ? styles.markedTextEnd : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        style={
+          {
+            '--mark-color': part.color,
+            '--overlap-color': part.overlapColor ?? part.color,
+          } as CSSProperties
+        }
+        data-entity-id={part.entityId}
+        data-overlap-count={part.overlapCount}
+        title={part.markIndexes
+          .map((markIndex) => entityNameById.get(marks[markIndex]?.entityId ?? '') ?? marks[markIndex]?.entityId)
+          .filter(Boolean)
+          .join(' + ')}
+        onClick={() => {
+          if (part.markIndex !== undefined) {
+            setActiveMarkIndex(part.markIndex);
+          }
+        }}
+        onContextMenu={(event) => {
+          if (part.markIndex !== undefined) {
+            handleMarkedSegmentContextMenu(event, part.markIndex);
+          }
+        }}
+      >
+        {hasStartBoundary && startBoundaryMarkIndex !== undefined ? (
+          <span
+            className={styles.resizeHandle}
+            data-edge="start"
+            data-selection-decorator="true"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              handleResizeStart({ markIndex: startBoundaryMarkIndex, edge: 'start' });
+            }}
+          >
+            {draggedMarkIndex !== startBoundaryMarkIndex ? (
+              <span
+                className={styles.entityLabel}
+                data-selection-decorator="true"
+                title={
+                  entityNameById.get(marks[startBoundaryMarkIndex]?.entityId ?? '') ??
+                  marks[startBoundaryMarkIndex]?.entityId
+                }
+              >
+                {entityNameById.get(marks[startBoundaryMarkIndex]?.entityId ?? '') ??
+                  marks[startBoundaryMarkIndex]?.entityId}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+        {text}
+        {hasEndBoundary && endBoundaryMarkIndex !== undefined ? (
+          <span
+            className={styles.resizeHandle}
+            data-edge="finish"
+            data-selection-decorator="true"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              handleResizeStart({ markIndex: endBoundaryMarkIndex, edge: 'finish' });
+            }}
+          />
+        ) : null}
+      </span>
+    );
+  };
+
   return (
     <>
       <section className={styles.workspace}>
@@ -500,7 +647,9 @@ export function Workspace() {
             const offset = messageOffsets[index];
             const isSelected = draftSelection.messageIds.includes(row.messageid);
             const isSegmentationAllowed = isRoleAllowedForSegmentation(row.usertype);
-            const messageParts = offset ? buildMessageTextParts(offset, visibleMarks, activeMarkIndex) : [];
+            const messageParts = offset
+              ? buildMessageTextParts(offset, previewMarks, activeMarkIndex, visibleMarkIndexes)
+              : [];
 
             return (
               <article
@@ -544,68 +693,19 @@ export function Workspace() {
                   ) : (
                     <p className={styles.messageText} data-selectable-text="true">
                       {messageParts.length > 0
-                        ? messageParts.map((part, partIndex) =>
-                            part.isMarked ? (
-                              <span
-                                key={`${row.messageid}-${partIndex}-${part.entityId}`}
-                                className={[
-                                  styles.markedText,
-                                  part.isActive ? styles.markedTextActive : '',
-                                  part.hasStartBorder ? styles.markedTextStart : '',
-                                  part.hasEndBorder ? styles.markedTextEnd : '',
-                                ]
-                                  .filter(Boolean)
-                                  .join(' ')}
-                                style={{ '--mark-color': part.color } as CSSProperties}
-                                data-entity-id={part.entityId}
-                                title={
-                                  part.markIndex !== undefined
-                                    ? entityNameById.get(marks[part.markIndex]?.entityId ?? '') ?? part.entityId
-                                    : part.entityId
-                                }
-                                onContextMenu={(event) => {
-                                  if (part.markIndex !== undefined) {
-                                    handleMarkedSegmentContextMenu(event, part.markIndex);
-                                  }
-                                }}
-                              >
-                                {part.hasStartBorder && part.markIndex !== undefined ? (
-                                  <span
-                                    className={styles.resizeHandle}
-                                    data-edge="start"
-                                    onMouseDown={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      handleResizeStart({ markIndex: part.markIndex!, edge: 'start' });
-                                    }}
-                                  >
-                                    {draggedMarkIndex !== part.markIndex ? (
-                                      <span
-                                        className={styles.entityLabel}
-                                        title={entityNameById.get(marks[part.markIndex]?.entityId ?? '') ?? part.entityId}
-                                      >
-                                        {entityNameById.get(marks[part.markIndex]?.entityId ?? '') ?? part.entityId}
-                                      </span>
-                                    ) : null}
-                                  </span>
-                                ) : null}
-                                {part.text}
-                                {part.hasEndBorder && part.markIndex !== undefined ? (
-                                  <span
-                                    className={styles.resizeHandle}
-                                    data-edge="finish"
-                                    onMouseDown={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      handleResizeStart({ markIndex: part.markIndex!, edge: 'finish' });
-                                    }}
-                                  />
-                                ) : null}
+                        ? buildWordChunks(messageParts).map((chunk, chunkIndex) => {
+                            const content = chunk.parts.map((part) => renderTextPart(part));
+
+                            if (chunk.type === 'space') {
+                              return content;
+                            }
+
+                            return (
+                              <span className={styles.wordChunk} key={`${row.messageid}-word-${chunkIndex}`}>
+                                {content}
                               </span>
-                            ) : (
-                              <span key={`${row.messageid}-${partIndex}`}>{part.text}</span>
-                            ),
-                          )
+                            );
+                          })
                         : row.text}
                     </p>
                   )}

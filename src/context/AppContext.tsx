@@ -15,8 +15,6 @@ import { LEFT_SIDEBAR_WIDTH, RIGHT_SIDEBAR_WIDTH } from '../utils/constants';
 import {
   buildMarkRangePayload,
   createMark,
-  hasIntersectingMark,
-  hasIntersectingRange,
   rebuildMarksAfterTextEdit,
 } from '../utils/marks';
 
@@ -275,11 +273,6 @@ export function AppProvider({ children }: PropsWithChildren) {
           return;
         }
 
-        if (hasIntersectingMark(marks, draftSelection)) {
-          setError('Нельзя создать сегмент: новый диапазон пересекается с существующим mark.');
-          return;
-        }
-
         const nextMark = createMark(entity, draftSelection);
 
         if (!nextMark) {
@@ -358,11 +351,6 @@ export function AppProvider({ children }: PropsWithChildren) {
           (constrainedRange.start !== normalizedRange.start || constrainedRange.finish !== normalizedRange.finish)
         ) {
           setError('Нельзя изменить границы сегмента: диапазон не может пересекать сообщения с недоступной для разметки ролью.');
-          return false;
-        }
-
-        if (hasIntersectingRange(marks, constrainedRange, markIndex)) {
-          setError('Нельзя изменить границы сегмента: диапазон пересекается с другим mark.');
           return false;
         }
 

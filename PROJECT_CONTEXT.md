@@ -4,7 +4,7 @@
 - Название проекта: `segmentation-text` (`package.json`), браузерный UI с заголовком `Text Segmentation` (`index.html`).
 - Тип проекта: одностраничное frontend-приложение на React + TypeScript + Vite.
 - Назначение проекта: интерфейс для ручной разметки диалога на сегменты по справочнику сущностей.
-- Краткое описание реализованного: приложение загружает mock CSV-диалог и mock JSON со списком сущностей, показывает трехколоночный layout, позволяет выделять текст, создавать сегменты (`marks`), редактировать текст сообщений, менять границы сегментов drag-resize, скрывать/показывать сегменты, сортировать и фильтровать их в правой панели, а также отмечать checkbox-поля у выбранного сегмента. Список сообщений в `Workspace` рендерится инкрементально чанками по мере прокрутки вниз. Разметка сейчас доступна для всех ролей, присутствующих в загруженном CSV; список разрешенных ролей вычисляется динамически из `csvRows`. В `Workspace` отображается progress tracking по общему числу сообщений, доступным для разметки и уже размеченным сообщениям. Сегменты в центральном блоке имеют компактную entity-label, чтобы было визуально понятно, к какой сущности относится segment.
+- Краткое описание реализованного: приложение загружает mock CSV-диалог и mock JSON со списком сущностей, показывает трехколоночный layout, позволяет выделять текст, создавать сегменты (`marks`), редактировать текст сообщений, менять границы сегментов drag-resize, скрывать/показывать сегменты, сортировать и фильтровать их в правой панели, а также отмечать checkbox-поля у выбранного сегмента. Список сообщений в `Workspace` рендерится инкрементально чанками по мере прокрутки вниз. Разметка сейчас доступна для всех ролей, присутствующих в загруженном CSV; список разрешенных ролей вычисляется динамически из `csvRows`. В `Workspace` отображается progress tracking по общему числу сообщений, доступным для разметки и уже размеченным сообщениям. Поддерживаются overlapping / nested segments без дублирования текста: один текстовый диапазон может быть покрыт несколькими `marks`. Сегменты в центральном блоке имеют компактную entity-label, чтобы было визуально понятно, к какой сущности относится segment.
 
 ## 2. Stack
 - Framework / library: React 18.
@@ -17,7 +17,7 @@
 - Forms: нативные `input`, `textarea`, `checkbox`, `radio`.
 - Tables: отдельной табличной библиотеки нет; данные рендерятся списками/карточками.
 - Data fetching: локальная загрузка mock-данных, CSV парсится через `papaparse`.
-- Validation: отдельной библиотеки нет; локальные проверки диапазонов и пересечений в `src/utils/marks.ts`.
+- Validation: отдельной библиотеки нет; локальные проверки корректности диапазонов в `src/utils/marks.ts`; пересечения сегментов сейчас разрешены.
 - Date utilities: отсутствуют.
 - Testing: не настроено, тестовых зависимостей и scripts нет.
 - Lint / format: не настроены, eslint/prettier конфиги отсутствуют.
@@ -89,6 +89,7 @@
 - `EntitiesPanel` создает `mark` из `draftSelection`
 - `marks` отображаются в `Workspace` и `SelectedSegmentsPanel`
 - изменения текста в `Workspace` -> `saveEditedRows` -> `rebuildMarksAfterTextEdit`
+- Overlap rendering: `src/utils/messageMarks.ts` строит атомарные text slices по всем boundary-точкам видимых `marks`; каждый slice хранит `markIndexes[]`, поэтому текст рендерится один раз даже при вложенных/пересекающихся segment.
 - Архитектурные паттерны: centralized context store, utility-first domain helpers, presentational panels с доступом к общему context.
 - Спорные места:
 - `AppContext` сочетает data loading, domain logic, UI-state и side effects в одном крупном файле.
@@ -115,8 +116,8 @@
 - `src/components/MainLayout.tsx` — каркас приложения и ресайз колонок; важность: high; риск изменения: medium
 - `src/components/EntitiesPanel.tsx` — список сущностей, поиск и infinite scroll-подобная пагинация; важность: medium; риск изменения: medium
 - `src/utils/selection.ts` — вычисление выделения и глобальных оффсетов через DOM API; важность: high; риск изменения: high
-- `src/utils/marks.ts` — создание, валидация пересечений и пересборка сегментов после редактирования текста; важность: high; риск изменения: high
-- `src/utils/messageMarks.ts` — разбиение текста сообщения на mark/unmark части и цветовая схема; важность: medium; риск изменения: medium
+- `src/utils/marks.ts` — создание, базовая валидация диапазонов и пересборка сегментов после редактирования текста; важность: high; риск изменения: high
+- `src/utils/messageMarks.ts` — атомарное разбиение текста сообщения на slices с `markIndexes[]`, поддержка overlap/nested rendering и цветовая схема; важность: high; риск изменения: high
 - `src/hooks/useEntitiesList.ts` — фильтрация и chunked rendering списка сущностей; важность: medium; риск изменения: low
 - `src/components/Resizer.tsx` — кнопка-зона для изменения ширины боковых панелей; важность: low; риск изменения: low
 
@@ -174,6 +175,8 @@
 - Forms: поиск по сущностям с clear action, чекбоксы фильтра, radio сортировки, чекбоксы полей сегмента, `textarea` для редактирования текста.
 - Tables / lists: списки карточек, без табличного грида.
 - Messages list rendering: упрощенный infinite scroll без удаления уже отрендеренных элементов; `Workspace` сначала показывает первые 25 сообщений и при достижении около 80% высоты контейнера догружает следующий chunk.
+- Overlapping / nested segments: пересекающиеся и вложенные segment разрешены; `Workspace` отображает один текстовый поток, а overlap-зоны подсвечиваются дополнительным striped/layered стилем. В overlap slice primary segment выбирается как active mark, если он покрывает slice, иначе как самый короткий/специфичный segment; click/context menu работают по primary segment, а boundary handles — по конкретному start/end mark на границе.
+- Selection over marked text: декоративные элементы segment (`resizeHandle`, `entityLabel`) помечены как selection decorators и не участвуют в расчете текстового offset в `selection.ts`; это нужно, чтобы выделение поверх существующего segment не расширялось за счет label/handle DOM.
 - Role-based segmentation: механизм ограничений по ролям сохранен, но текущая конфигурация `allowedRolesForSegmentation` автоматически включает все роли из загруженного CSV, поэтому в стандартном mock-сценарии все сообщения доступны для разметки.
 - Role-based segmentation для resize: логика ограничения границ существующего segment по разрешенным ролям сохранена, но при текущей конфигурации не создает дополнительных барьеров между существующими сообщениями.
 - Progress tracking: в `AppContext` вычисляется агрегированная статистика по сообщениям (`totalMessages`, `availableMessages`, `markedMessages`), а в `Workspace` она показывается отдельным summary-блоком.
@@ -192,6 +195,8 @@
 - Full overlay handles: start/end resize handles в `Workspace` снова переведены в absolute overlay-режим относительно `markedText`, чтобы геометрия бортиков и hit area вообще не участвовала в переносе символов.
 - Stable text gutter for resize: у `messageText` добавлен постоянный горизонтальный запас под boundary handles, а `resizeHandle` возвращен к нулевой-width `inline-block` anchor; это нужно, чтобы бортики снова двигались вместе с границей segment, но доступная ширина строки не менялась на лету во время resize.
 - Boundary-safe text inset: start/end части segment в `Workspace` снова имеют небольшой внутренний сдвиг текста на толщину boundary-линии, а общий gutter у `messageText` резервирует место под это смещение заранее, чтобы крайние символы не перекрывались бортиком и не должны были переезжать на другую строку из-за resize.
+- Smooth boundary overlay: start/end части segment больше не получают горизонтальный padding под бортик; видимая boundary-линия остается zero-width overlay-handle и не должна раздвигать символы или менять переносы строк во время selection/resize.
+- Stable word wrapping: `Workspace` группирует непробельные последовательности text parts в `.wordChunk` (`inline-block`, `white-space: nowrap`), чтобы segment boundaries внутри слова не создавали новые browser line-break points и отдельные символы не перескакивали между строками при resize; start/end бортики при этом рендерятся только на первом/последнем непробельном куске исходного segment part, а не на каждом слове.
 - Empty-state layout behavior: левая панель со списком сущностей сохраняет стабильный размер даже если поиск вернул `0` результатов; empty state не должен схлопывать колонку до минимальной высоты.
 - Segment navigation: клик по segment в правой панели активирует segment и прокручивает `Workspace` к первому связанному сообщению; если сообщение еще не отрендерено из-за chunk rendering, `Workspace` сначала увеличивает `visibleCount`, затем делает `scrollIntoView`.
 - Context delete in Workspace: по правому клику на segment в центральном блоке показывается локальная delete overlay-кнопка; она удаляет segment через существующий `removeMark` и закрывается при outside click, scroll, `Escape`, смене active segment или входе в edit mode.
@@ -218,7 +223,8 @@
 - `src/components/Workspace.tsx` — сложная интерактивность: DOM selection, drag-resize, edit mode, подсветка.
 - `src/components/SelectedSegmentsPanel.tsx` — крупный компонент с несколькими независимыми UI-состояниями и действиями над сегментами.
 - `src/utils/selection.ts` — зависит от браузерных DOM API (`Selection`, `Range`, `caretPositionFromPoint`, `caretRangeFromPoint`), легко получить регрессию.
-- `src/utils/marks.ts` — критичная логика пересечений и пересборки диапазонов после редактирования текста.
+- `src/utils/marks.ts` — критичная логика создания, пересборки диапазонов после редактирования текста и инвариантов `start < finish`.
+- `src/utils/messageMarks.ts` — критичная логика overlap rendering; ошибка здесь может привести к дублированию текста, неверным boundary handles или неправильному active segment в `Workspace`.
 - `mocks/entities.json` — большой файл, изменение структуры сломает создание/отображение сегментов.
 - Зоны потенциальных регрессий:
 - пересчет глобальных и локальных диапазонов после редактирования текста
@@ -262,7 +268,7 @@
 - визуальная entity-идентификация segment в центральном блоке
 - clear action в поиске сущностей левой панели
 - delete action через context interaction в Workspace
-- блокировка пересекающихся сегментов
+- поддержка overlapping / nested segments без дублирования текста
 - выбор текста мышью внутри сообщений
 - двойной клик по сообщению для выбора всего сообщения
 - создание сегмента кликом по сущности
@@ -298,6 +304,8 @@
 - `AppContext` перегружен ответственностями и уже стал центральным узким местом.
 - `SelectedSegmentsPanel.tsx` и `Workspace.tsx` крупные и насыщены логикой, что усложняет безопасные точечные изменения.
 - В `Workspace.tsx` интерактивность selection/resize теперь совмещена с incremental rendering, поэтому изменения в scroll logic нужно проверять особенно аккуратно.
+- Overlap rendering усложняет `messageMarks.ts` и `Workspace`: один text slice может ссылаться на несколько `markIndexes`, но resize/delete/context-menu управляют одним primary или boundary mark; это нужно проверять на nested и partial overlap cases.
+- `selection.ts` теперь вручную считает offset только по selectable text nodes и игнорирует `[data-selection-decorator="true"]`; при добавлении новых декоративных элементов внутрь `data-selectable-text` их нужно помечать тем же атрибутом.
 - Ограничение по ролям завязано на `draftSelection.messageIds` и `csvRows`, поэтому любые изменения selection flow или формата ролей могут повлиять на создание segment.
 - Логика role-based segmentation по-прежнему влияет и на `updateMarkRange`; если в будущем список разрешенных ролей снова станет явной фильтрацией, нужно перепроверять не только создание сегментов, но и drag-resize существующих.
 - `segmentationProgress` считается по `marks.selectedSegment`; если в будущем изменится модель привязки mark к сообщениям, прогресс тоже нужно будет пересматривать.
@@ -348,6 +356,26 @@
 ## 19. Update log
 
 ### Update log
+- Date: 2026-04-16
+- What was analyzed: line wrapping instability when segment boundary splits a word into multiple inline spans during overlap/end-resize.
+- What was added/updated in context: `Workspace` now groups adjacent non-space rendered text parts into word chunks, so a word remains one no-break inline unit even when several segment slices/overlays cover different characters inside it; boundary handles are limited to the first/last non-space split of the original segment part to avoid duplicate borders on every word.
+- Notes: natural wrapping between words is preserved; very long words may no longer break character-by-character inside the message line, which is the tradeoff for preventing single-character jumps caused by segment DOM boundaries.
+
+- Date: 2026-04-16
+- What was analyzed: CSS box model marked segment boundaries in `Workspace`, especially `markedTextStart` / `markedTextEnd` padding and visible resize boundary width.
+- What was added/updated in context: removed layout-affecting horizontal padding from start/end segment parts and made the visible boundary line thinner, so borders no longer push text characters during selection or resize.
+- Notes: this is a presentation-layer fix in `Workspace.module.css`; resize state, selection math and overlap data model were not changed.
+
+- Date: 2026-04-16
+- What was analyzed: `getTextOffsetWithinElement` в `src/utils/selection.ts`, DOM-структура marked segment в `Workspace` и влияние `resizeHandle` / `entityLabel` на расчет offset при выделении поверх существующего segment.
+- What was added/updated in context: selection offset теперь считается только по реальному тексту сообщения; segment decorations помечены `data-selection-decorator="true"` и исключаются из подсчета, чтобы новый overlap segment не захватывал лишние символы.
+- Notes: исправление локальное для selection math и DOM attributes, без изменения shape `marks`, overlap rendering или createMark flow.
+
+- Date: 2026-04-16
+- What was analyzed: `AppContext` creation/resize checks, `src/utils/marks.ts`, `src/utils/messageMarks.ts`, `Workspace` rendering of marked text, active mark interaction, delete overlay and right-panel navigation assumptions.
+- What was added/updated in context: overlapping / nested segments are now supported; intersection blocking was removed from create/resize flow, and message rendering now uses atomic text slices with `markIndexes[]` so text is rendered once even when multiple segments cover the same range.
+- Notes: overlap UX uses primary segment selection per slice plus boundary-specific handles; in multi-cover slices active mark wins, otherwise the shortest/specific segment is primary. Remaining limitation: simultaneous display of all labels/handles in one exact overlap point is intentionally simplified to avoid visual chaos.
+
 - Date: 2026-04-16
 - What was analyzed: текущий формат `mocks/0b2a5a2a058e4df59b344416a45bc259.csv`, количество строк, header и совместимость с `Papa.parse`.
 - What was added/updated in context: mock CSV расширен до `1000` data-rows; документация обновлена с актуальным размером тестового диалога.

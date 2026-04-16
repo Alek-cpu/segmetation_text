@@ -176,18 +176,60 @@ function getTextOffsetWithinElement(
   targetNode: Node | null,
   targetOffset: number,
 ): number {
-  if (!targetNode) {
+  if (!targetNode || !textElement.contains(targetNode)) {
     return 0;
   }
 
-  const range = document.createRange();
-  range.selectNodeContents(textElement);
+  let offset = 0;
+  let foundTarget = false;
 
-  try {
-    range.setEnd(targetNode, targetOffset);
-  } catch {
+  const visitNode = (node: Node) => {
+    if (foundTarget || isSelectionDecorator(node)) {
+      return;
+    }
+
+    if (node === targetNode) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        offset += Math.min(targetOffset, node.textContent?.length ?? 0);
+      } else {
+        Array.from(node.childNodes)
+          .slice(0, targetOffset)
+          .forEach((childNode) => {
+            offset += getSelectableTextLength(childNode);
+          });
+      }
+
+      foundTarget = true;
+      return;
+    }
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      offset += node.textContent?.length ?? 0;
+      return;
+    }
+
+    node.childNodes.forEach(visitNode);
+  };
+
+  visitNode(textElement);
+
+  return offset;
+}
+
+function getSelectableTextLength(node: Node): number {
+  if (isSelectionDecorator(node)) {
     return 0;
   }
 
-  return range.toString().length;
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent?.length ?? 0;
+  }
+
+  return Array.from(node.childNodes).reduce((length, childNode) => length + getSelectableTextLength(childNode), 0);
+}
+
+function isSelectionDecorator(node: Node): boolean {
+  const element = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement;
+
+  return Boolean(element?.closest('[data-selection-decorator="true"]'));
 }

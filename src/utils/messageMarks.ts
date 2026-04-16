@@ -3,12 +3,17 @@ import type { Mark, MessageOffset } from '../types/app';
 export type MessageTextPart = {
   text: string;
   isMarked: boolean;
+  markIndexes: number[];
   markIndex?: number;
   isActive?: boolean;
   entityId?: string;
   color?: string;
+  overlapColor?: string;
+  overlapCount?: number;
   hasStartBorder?: boolean;
   hasEndBorder?: boolean;
+  startBoundaryMarkIndex?: number;
+  endBoundaryMarkIndex?: number;
 };
 
 type MessageMarkSegment = {
@@ -24,9 +29,11 @@ export function buildMessageTextParts(
   messageOffset: MessageOffset,
   marks: Mark[],
   activeMarkIndex: number | null,
+  visibleMarkIndexes?: Set<number>,
 ): MessageTextPart[] {
   const segments = marks
     .map((mark, markIndex) => ({ mark, markIndex }))
+    .filter(({ markIndex }) => !visibleMarkIndexes || visibleMarkIndexes.has(markIndex))
     .filter(({ mark }) => mark.position.finish > messageOffset.start && mark.position.start < messageOffset.end)
     .map<MessageMarkSegment>(({ mark, markIndex }) => ({
       markIndex,
@@ -39,42 +46,121 @@ export function buildMessageTextParts(
     .sort((left, right) => left.start - right.start);
 
   if (segments.length === 0) {
-    return [{ text: messageOffset.text, isMarked: false }];
+    return [{ text: messageOffset.text, isMarked: false, markIndexes: [] }];
   }
 
-  const parts: MessageTextPart[] = [];
-  let cursor = messageOffset.start;
+  const boundaryPoints = [...new Set([
+    messageOffset.start,
+    messageOffset.end,
+    ...segments.flatMap((segment) => [segment.start, segment.finish]),
+  ])].sort((left, right) => left - right);
 
-  segments.forEach((segment) => {
-    if (segment.start > cursor) {
-      parts.push({
-        text: messageOffset.text.slice(cursor - messageOffset.start, segment.start - messageOffset.start),
-        isMarked: false,
-      });
+  const parts: MessageTextPart[] = [];
+
+  for (let index = 0; index < boundaryPoints.length - 1; index += 1) {
+    const start = boundaryPoints[index];
+    const finish = boundaryPoints[index + 1];
+
+    if (start === finish) {
+      continue;
     }
 
-    parts.push({
-      text: messageOffset.text.slice(segment.start - messageOffset.start, segment.finish - messageOffset.start),
-      isMarked: true,
-      markIndex: segment.markIndex,
-      isActive: activeMarkIndex === segment.markIndex,
-      entityId: segment.entityId,
-      color: getEntityColor(segment.entityId),
-      hasStartBorder: segment.hasStartBorder,
-      hasEndBorder: segment.hasEndBorder,
+    const text = messageOffset.text.slice(start - messageOffset.start, finish - messageOffset.start);
+    const coveringSegments = segments.filter((segment) => segment.finish > start && segment.start < finish);
+
+    if (coveringSegments.length === 0) {
+      parts.push({
+        text,
+        isMarked: false,
+        markIndexes: [],
+      });
+      continue;
+    }
+
+    const primarySegment = getPrimarySegment(coveringSegments, activeMarkIndex);
+    const startBoundarySegment = getBoundarySegment({
+      segments: coveringSegments,
+      boundary: start,
+      activeMarkIndex,
+      edge: 'start',
+    });
+    const endBoundarySegment = getBoundarySegment({
+      segments: coveringSegments,
+      boundary: finish,
+      activeMarkIndex,
+      edge: 'finish',
     });
 
-    cursor = segment.finish;
-  });
-
-  if (cursor < messageOffset.end) {
     parts.push({
-      text: messageOffset.text.slice(cursor - messageOffset.start),
-      isMarked: false,
+      text,
+      isMarked: true,
+      markIndexes: coveringSegments.map((segment) => segment.markIndex),
+      markIndex: primarySegment.markIndex,
+      isActive: coveringSegments.some((segment) => segment.markIndex === activeMarkIndex),
+      entityId: primarySegment.entityId,
+      color: getEntityColor(primarySegment.entityId),
+      overlapColor: getOverlapColor(coveringSegments, primarySegment),
+      overlapCount: coveringSegments.length,
+      hasStartBorder: Boolean(startBoundarySegment),
+      hasEndBorder: Boolean(endBoundarySegment),
+      startBoundaryMarkIndex: startBoundarySegment?.markIndex,
+      endBoundaryMarkIndex: endBoundarySegment?.markIndex,
     });
   }
 
   return parts.filter((part) => part.text.length > 0);
+}
+
+function getOverlapColor(segments: MessageMarkSegment[], primarySegment: MessageMarkSegment) {
+  const secondarySegment = segments.find((segment) => segment.markIndex !== primarySegment.markIndex);
+
+  return secondarySegment ? getEntityColor(secondarySegment.entityId) : undefined;
+}
+
+function getPrimarySegment(segments: MessageMarkSegment[], activeMarkIndex: number | null) {
+  const activeSegment = segments.find((segment) => segment.markIndex === activeMarkIndex);
+
+  if (activeSegment) {
+    return activeSegment;
+  }
+
+  return [...segments].sort((left, right) => {
+    const leftLength = left.finish - left.start;
+    const rightLength = right.finish - right.start;
+
+    if (leftLength !== rightLength) {
+      return leftLength - rightLength;
+    }
+
+    return right.markIndex - left.markIndex;
+  })[0];
+}
+
+function getBoundarySegment(params: {
+  segments: MessageMarkSegment[];
+  boundary: number;
+  activeMarkIndex: number | null;
+  edge: 'start' | 'finish';
+}) {
+  const boundarySegments = params.segments.filter((segment) => {
+    if (params.edge === 'start') {
+      return segment.hasStartBorder && segment.start === params.boundary;
+    }
+
+    return segment.hasEndBorder && segment.finish === params.boundary;
+  });
+
+  if (boundarySegments.length === 0) {
+    return undefined;
+  }
+
+  const activeBoundarySegment = boundarySegments.find((segment) => segment.markIndex === params.activeMarkIndex);
+
+  if (activeBoundarySegment) {
+    return activeBoundarySegment;
+  }
+
+  return getPrimarySegment(boundarySegments, params.activeMarkIndex);
 }
 
 export function getEntityColor(entityId: string): string {
