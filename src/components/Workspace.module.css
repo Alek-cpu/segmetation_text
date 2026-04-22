@@ -37,6 +37,26 @@
   cursor: pointer;
 }
 
+.resultButton {
+  padding: 8px 12px;
+  border: 1px solid #0f172a;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #ffffff;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.resultButton:hover,
+.resultButton:focus-visible {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+  box-shadow: 0 0 0 3px rgba(42, 114, 248, 0.16);
+}
+
 .badge,
 .errorBadge {
   padding: 8px 12px;
@@ -55,32 +75,82 @@
 
 .progressBlock {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 .progressItem {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 14px 16px;
+  gap: 4px;
+  padding: 9px 12px;
   border: 1px solid #d9e2ec;
-  border-radius: 16px;
+  border-radius: 12px;
   background: #ffffff;
 }
 
 .progressLabel {
-  font-size: 12px;
+  display: block;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #64748b;
 }
 
 .progressValue {
-  font-size: 24px;
+  display: block;
+  font-size: 18px;
   line-height: 1;
   color: #0f172a;
+}
+
+.progressItemWithActions {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.unmarkedNavigation {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.unmarkedNavigationButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+
+.unmarkedNavigationButton:hover,
+.unmarkedNavigationButton:focus-visible {
+  border-color: #60a5fa;
+  background: #dbeafe;
+  color: #1e40af;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+}
+
+.unmarkedNavigationButton:disabled {
+  border-color: #e2e8f0;
+  background: #f8fafc;
+  color: #cbd5e1;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .messages {
@@ -129,8 +199,8 @@
   background: #f8fbff;
 }
 
-.messageRowEditing {
-  min-height: 124px;
+.messageRowScrollHighlight {
+  animation: message-scroll-highlight 1.4s ease-out;
 }
 
 .messageRowDisabled {
@@ -138,8 +208,32 @@
   cursor: not-allowed;
 }
 
+@keyframes message-scroll-highlight {
+  0% {
+    border-color: #f59e0b;
+    background: #fffbeb;
+    box-shadow:
+      inset 0 0 0 2px rgba(245, 158, 11, 0.55),
+      0 12px 28px rgba(245, 158, 11, 0.18);
+  }
+
+  65% {
+    border-color: #fbbf24;
+    background: #fff7ed;
+    box-shadow:
+      inset 0 0 0 1px rgba(251, 191, 36, 0.36),
+      0 8px 22px rgba(245, 158, 11, 0.12);
+  }
+
+  100% {
+    border-color: #e5e7eb;
+    background: #ffffff;
+    box-shadow: none;
+  }
+}
+
 .messageRowDisabled .messageText,
-.messageRowDisabled .messageEditor,
+.messageRowDisabled .messageEditable,
 .messageRowDisabled .userType {
   cursor: not-allowed;
 }
@@ -170,21 +264,24 @@
   word-break: break-word;
 }
 
-.messageEditor {
-  display: block;
-  width: 100%;
-  height: 96px;
-  min-height: 96px;
-  max-height: 96px;
-  padding: 10px 12px;
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  box-sizing: border-box;
-  overflow: auto;
-  resize: none;
-  font: inherit;
-  color: #1f2937;
-  background: #ffffff;
+.messageEditable {
+  min-height: 1.4em;
+  border-radius: 0;
+  cursor: text;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  transition:
+    background-color 0.15s ease,
+    outline-color 0.15s ease;
+}
+
+.messageEditable:hover {
+  background: transparent;
+}
+
+.messageEditable:focus {
+  background: transparent;
+  outline-color: rgba(42, 114, 248, 0.28);
 }
 
 .wordChunk {
@@ -337,6 +434,82 @@
   background: #fef2f2;
   color: #991b1b;
   box-shadow: 0 0 0 3px rgba(248, 113, 113, 0.16);
+}
+
+.resultOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.resultPanel {
+  display: flex;
+  flex-direction: column;
+  width: min(920px, 100%);
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid #dbe3ef;
+  border-radius: 20px;
+  background: #ffffff;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.28);
+}
+
+.resultHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.resultTitle {
+  margin: 0;
+  color: #0f172a;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.resultMeta {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.resultCloseButton {
+  width: 34px;
+  height: 34px;
+  border: 1px solid #d9e2ec;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.resultCloseButton:hover,
+.resultCloseButton:focus-visible {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.resultPre {
+  margin: 0;
+  padding: 18px 20px;
+  overflow: auto;
+  color: #dbeafe;
+  background: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
 }
 
 .messages::-webkit-scrollbar {

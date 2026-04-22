@@ -4,7 +4,7 @@
 - Название проекта: `segmentation-text` (`package.json`), браузерный UI с заголовком `Text Segmentation` (`index.html`).
 - Тип проекта: одностраничное frontend-приложение на React + TypeScript + Vite.
 - Назначение проекта: интерфейс для ручной разметки диалога на сегменты по справочнику сущностей.
-- Краткое описание реализованного: приложение загружает mock CSV-диалог и mock JSON со списком сущностей, показывает трехколоночный layout, позволяет выделять текст, создавать сегменты (`marks`), редактировать текст сообщений, менять границы сегментов drag-resize, скрывать/показывать сегменты, сортировать и фильтровать их в правой панели, а также отмечать checkbox-поля у выбранного сегмента. Список сообщений в `Workspace` рендерится инкрементально чанками по мере прокрутки вниз. Разметка сейчас доступна для всех ролей, присутствующих в загруженном CSV; список разрешенных ролей вычисляется динамически из `csvRows`. В `Workspace` отображается progress tracking по общему числу сообщений, доступным для разметки и уже размеченным сообщениям. Поддерживаются overlapping / nested segments без дублирования текста: один текстовый диапазон может быть покрыт несколькими `marks`. Сегменты в центральном блоке имеют компактную entity-label, чтобы было визуально понятно, к какой сущности относится segment.
+- Краткое описание реализованного: приложение загружает mock CSV-диалог и mock JSON со списком сущностей, показывает трехколоночный layout, позволяет выделять текст, создавать сегменты (`marks`), редактировать текст сообщений, менять границы сегментов drag-resize, скрывать/показывать сегменты, сортировать и фильтровать их в правой панели, а также отмечать checkbox-поля у выбранного сегмента. Список сообщений в `Workspace` рендерится инкрементально чанками по мере прокрутки вниз. Разметка сейчас доступна для всех ролей, присутствующих в загруженном CSV; список разрешенных ролей вычисляется динамически из `csvRows`. В `Workspace` отображается progress tracking по общему числу сообщений, доступным для разметки, размеченным и неразмеченным сообщениям; рядом со счетчиком неразмеченных есть стрелки перехода к предыдущей/следующей неразмеченной реплике. Поддерживаются overlapping / nested segments без дублирования текста: один текстовый диапазон может быть покрыт несколькими `marks`. Сегменты в центральном блоке имеют компактную entity-label, чтобы было визуально понятно, к какой сущности относится segment. В верхнем toolbar есть кнопка просмотра итогового JSON-результата текущей разметки.
 
 ## 2. Stack
 - Framework / library: React 18.
@@ -14,7 +14,7 @@
 - State management: React Context + `useState` / `useMemo` / `useEffect` в одном провайдере.
 - Styling: глобальный CSS + CSS Modules.
 - UI libraries: отсутствуют.
-- Forms: нативные `input`, `textarea`, `checkbox`, `radio`.
+- Forms: нативные `input`, `checkbox`, `radio`; редактирование текста сообщений сделано через inline `contentEditable`, без `textarea`.
 - Tables: отдельной табличной библиотеки нет; данные рендерятся списками/карточками.
 - Data fetching: локальная загрузка mock-данных, CSV парсится через `papaparse`.
 - Validation: отдельной библиотеки нет; локальные проверки корректности диапазонов в `src/utils/marks.ts`; пересечения сегментов сейчас разрешены.
@@ -172,16 +172,17 @@
 - левая панель — список сущностей и поиск
 - центр — диалог и редактирование текста
 - правая панель — выбранные сегменты, сортировка, фильтр, видимость
-- Forms: поиск по сущностям с clear action, чекбоксы фильтра, radio сортировки, чекбоксы полей сегмента, `textarea` для редактирования текста.
+- Forms: поиск по сущностям с clear action, чекбоксы фильтра, radio сортировки, чекбоксы полей сегмента; текст сообщений редактируется inline через `contentEditable` в том же визуальном формате, без отображения `textarea`.
 - Tables / lists: списки карточек, без табличного грида.
 - Messages list rendering: упрощенный infinite scroll без удаления уже отрендеренных элементов; `Workspace` сначала показывает первые 25 сообщений и при достижении около 80% высоты контейнера догружает следующий chunk.
 - Overlapping / nested segments: пересекающиеся и вложенные segment разрешены; `Workspace` отображает один текстовый поток, а overlap-зоны подсвечиваются дополнительным striped/layered стилем. В overlap slice primary segment выбирается как active mark, если он покрывает slice, иначе как самый короткий/специфичный segment; click/context menu работают по primary segment, а boundary handles — по конкретному start/end mark на границе.
 - Selection over marked text: декоративные элементы segment (`resizeHandle`, `entityLabel`) помечены как selection decorators и не участвуют в расчете текстового offset в `selection.ts`; это нужно, чтобы выделение поверх существующего segment не расширялось за счет label/handle DOM.
 - Role-based segmentation: механизм ограничений по ролям сохранен, но текущая конфигурация `allowedRolesForSegmentation` автоматически включает все роли из загруженного CSV, поэтому в стандартном mock-сценарии все сообщения доступны для разметки.
 - Role-based segmentation для resize: логика ограничения границ существующего segment по разрешенным ролям сохранена, но при текущей конфигурации не создает дополнительных барьеров между существующими сообщениями.
-- Progress tracking: в `AppContext` вычисляется агрегированная статистика по сообщениям (`totalMessages`, `availableMessages`, `markedMessages`), а в `Workspace` она показывается отдельным summary-блоком.
+- Progress tracking: в `AppContext` вычисляется агрегированная статистика по сообщениям (`totalMessages`, `availableMessages`, `markedMessages`), а в `Workspace` она показывается отдельным summary-блоком. `Workspace` дополнительно считает неразмеченные доступные реплики и показывает счетчик `Не размечено` с кнопками перехода к предыдущей/следующей неразмеченной реплике; после программной прокрутки целевая реплика кратко подсвечивается.
+- Result preview: в toolbar `Workspace` есть кнопка `Показать результат`, которая открывает modal через portal и показывает JSON с `totalMessages`, `totalSegments` и массивом `segments` (`entityId`, `entityName`, `position`, `text`, `selectedSegment`, `messageRanges`, `fields`, visibility flags).
 - Entity identification in Workspace: у старта сегмента показывается компактная label с `entity.name`; длинные названия обрезаются через ellipsis, а при наведении на label полный текст показывается через native tooltip (`title`).
-- Edit mode layout behavior: при переходе в режим редактирования центральный блок не должен менять размер из-за `textarea`; высота редактируемой строки и `textarea` зафиксированы, лишний контент уходит во внутренний scroll поля.
+- Edit mode layout behavior: при переходе в режим редактирования центральный блок не должен показывать `textarea` и не должен убирать визуальную подсветку segment; сообщение редактируется inline через `contentEditable` поверх того же segmented rendering, но без интерактивных resize/delete handles, сохранение по-прежнему идет через `saveEditedRows`, а scroll позиция списка сообщений сохраняется при входе/выходе из edit mode.
 - Resize start-handle stabilized: drag-resize начала segment в `Workspace` теперь использует более стабильный drag flow через ref-состояние и временно отключает text selection во время resize, чтобы уменьшить jitter и скачки левого бортика.
 - Resize overlay behavior: во время drag у `resizeHandle` и `entityLabel` временно отключаются pointer events, а label редактируемого segment скрывается до `mouse up`, чтобы вычисление caret/offset происходило по тексту под сегментом, а не по overlay-элементам.
 - End-handle drag reliability: hit area у правого resize-handle увеличена, сам handle поднят по `z-index` и смещен глубже внутрь правого края segment, чтобы drag конца segment надежнее стартовал даже после предыдущего resize, у коротких сегментов и рядом с концом сообщения.
@@ -198,11 +199,12 @@
 - Smooth boundary overlay: start/end части segment больше не получают горизонтальный padding под бортик; видимая boundary-линия остается zero-width overlay-handle и не должна раздвигать символы или менять переносы строк во время selection/resize.
 - Stable word wrapping: `Workspace` группирует непробельные последовательности text parts в `.wordChunk` (`inline-block`, `white-space: nowrap`), чтобы segment boundaries внутри слова не создавали новые browser line-break points и отдельные символы не перескакивали между строками при resize; start/end бортики при этом рендерятся только на первом/последнем непробельном куске исходного segment part, а не на каждом слове.
 - Empty-state layout behavior: левая панель со списком сущностей сохраняет стабильный размер даже если поиск вернул `0` результатов; empty state не должен схлопывать колонку до минимальной высоты.
-- Segment navigation: клик по segment в правой панели активирует segment и прокручивает `Workspace` к первому связанному сообщению; если сообщение еще не отрендерено из-за chunk rendering, `Workspace` сначала увеличивает `visibleCount`, затем делает `scrollIntoView`.
+- Segment navigation: клик по segment-card в правой панели только активирует/раскрывает segment без прокрутки; явная прокрутка к segment выполняется только отдельной кнопкой `↗` у каждого segment. Навигация идет через `requestMarkNavigation(markIndex)` / `markNavigationRequest`, поэтому повторный клик по `↗` у уже активного segment тоже запускает scroll. Обычный клик по segment внутри `Workspace` только меняет `activeMarkIndex` и не запускает автопрокрутку. Если сообщение еще не отрендерено из-за chunk rendering, `Workspace` сначала увеличивает `visibleCount`, затем прокручивает внутренний `messagesRef` контейнер через `scrollTo`.
 - Context delete in Workspace: по правому клику на segment в центральном блоке показывается локальная delete overlay-кнопка; она удаляет segment через существующий `removeMark` и закрывается при outside click, scroll, `Escape`, смене active segment или входе в edit mode.
 - Tooltip rendering: tooltip в `SelectedSegmentsPanel` рендерятся на уровне `document.body` через portal и `position: fixed`, поэтому не должны обрезаться контейнерами с `overflow: hidden`.
 - Dropdown/popup positioning: popup сортировки и фильтра в `SelectedSegmentsPanel` позиционируются через `getBoundingClientRect()` и viewport-check; если не хватает места справа, popup смещается влево, если снизу не хватает высоты, popup открывается вверх.
 - Right panel button UX: control buttons в `SelectedSegmentsPanel` имеют явный `cursor: pointer`, hover/focus state, а кнопка удаления (`×`) увеличена для более удобного попадания.
+- Draft selection summary: блок `Draft selection` в правой панели по умолчанию компактный, с ограниченной высотой текста и внутренним scroll; при необходимости его можно развернуть/свернуть отдельной кнопкой.
 - Filters / sorting / search:
 - поиск по `entity.id` и `entity.name`
 - в поиске сущностей есть clear action (`×`), который очищает строку и возвращает список к полному состоянию
@@ -259,18 +261,19 @@
 - инкрементальный chunk rendering списка сообщений при скролле вниз
 - role-based segmentation: в текущем состоянии проекта сегменты можно создавать по всем сообщениям из загруженного CSV, потому что все их роли автоматически считаются разрешенными
 - resize segment по-прежнему использует те же role-based проверки, но при текущей конфигурации они не ограничивают растяжение между существующими сообщениями
-- progress tracking разметки по сообщениям с учетом role-filter
+- progress tracking разметки по сообщениям с учетом role-filter, включая счетчик неразмеченных доступных реплик и навигацию по ним
 - edit mode с фиксированным layout центрального блока
-- навигация к segment из правой панели с учетом chunk loading
+- навигация к segment из правой панели с учетом chunk loading, включая отдельную кнопку `↗` у каждого выбранного segment
 - tooltip в правой панели поверх UI без clipping контейнером
 - viewport-aware popup positioning для sort/filter controls правой панели
 - улучшенный UX control buttons правой панели
+- компактный `Draft selection` summary с возможностью развернуть/свернуть длинный текст выделения
 - визуальная entity-идентификация segment в центральном блоке
 - clear action в поиске сущностей левой панели
 - delete action через context interaction в Workspace
 - поддержка overlapping / nested segments без дублирования текста
+- просмотр итогового JSON-результата разметки через кнопку в верхнем toolbar
 - выбор текста мышью внутри сообщений
-- двойной клик по сообщению для выбора всего сообщения
 - создание сегмента кликом по сущности
 - визуальная подсветка сегментов в тексте
 - изменение границ сегмента drag-resize
@@ -283,7 +286,7 @@
 - редактирование checkbox-полей у сегмента
 - работающие пользовательские сценарии:
 - оператор открывает диалог и список сущностей
-- выделяет фрагмент текста или целое сообщение
+- выделяет фрагмент текста
 - создает сегмент по выбранной сущности
 - управляет созданными сегментами в правой панели
 - корректирует текст диалога и сохраняет обновленные диапазоны сегментов
@@ -306,13 +309,14 @@
 - В `Workspace.tsx` интерактивность selection/resize теперь совмещена с incremental rendering, поэтому изменения в scroll logic нужно проверять особенно аккуратно.
 - Overlap rendering усложняет `messageMarks.ts` и `Workspace`: один text slice может ссылаться на несколько `markIndexes`, но resize/delete/context-menu управляют одним primary или boundary mark; это нужно проверять на nested и partial overlap cases.
 - `selection.ts` теперь вручную считает offset только по selectable text nodes и игнорирует `[data-selection-decorator="true"]`; при добавлении новых декоративных элементов внутрь `data-selectable-text` их нужно помечать тем же атрибутом.
+- Result preview в `Workspace` сейчас является UI-only JSON snapshot из текущих `marks`; это не backend export и не сохраняет данные наружу.
 - Ограничение по ролям завязано на `draftSelection.messageIds` и `csvRows`, поэтому любые изменения selection flow или формата ролей могут повлиять на создание segment.
 - Логика role-based segmentation по-прежнему влияет и на `updateMarkRange`; если в будущем список разрешенных ролей снова станет явной фильтрацией, нужно перепроверять не только создание сегментов, но и drag-resize существующих.
 - `segmentationProgress` считается по `marks.selectedSegment`; если в будущем изменится модель привязки mark к сообщениям, прогресс тоже нужно будет пересматривать.
-- В `Workspace` edit mode теперь завязан на фиксированную высоту `textarea`; если в будущем понадобится авто-рост поля, это может снова повлиять на layout и scroll behavior.
+- В `Workspace` edit mode теперь завязан на inline `contentEditable`, сохранение highlighted segment context и восстановление `messagesRef.scrollTop`; при изменениях важно не ломать синхронизацию `editableRowsRef`, сохранение через `saveEditedRows`, сохранение scroll позиции и отсутствие влияния edit mode на selection/resize flow вне режима редактирования.
 - Entity-label в `Workspace` опирается на текущий `entities` lookup и `markIndex`; при изменениях модели marks/entities или рендера частей сообщения нужно перепроверять label positioning, selection и resize handles.
 - Delete overlay в `Workspace` завязана на индекс `mark` и существующий `removeMark`; с учетом индексной модели marks нужно отдельно проверять сценарии удаления первого/последнего/active segment.
-- Segment navigation завязана на `marks[index].selectedSegment[0]` и `activeMarkIndex`; любые изменения модели segment или порядка массива `marks` нужно проверять вместе с логикой прокрутки.
+- Segment navigation завязана на `marks[index].selectedSegment[0]` и отдельный `markNavigationRequest`; `activeMarkIndex` сам по себе не должен вызывать scroll, чтобы клики по segment внутри `Workspace` и клики по card в `SelectedSegmentsPanel` не подбрасывали список. Любые изменения модели segment или порядка массива `marks` нужно проверять вместе с логикой прокрутки и повторных navigation requests.
 - В `SelectedSegmentsPanel` навигация и действия над segment должны использовать исходный индекс `mark` из глобального массива `marks`, а не индекс элемента после сортировки/фильтрации; иначе ломаются активный segment, удаление, видимость и scroll-to-segment.
 - Tooltip в `SelectedSegmentsPanel` теперь завязаны на portal-rendering и координаты из `getBoundingClientRect`; при будущих изменениях tooltip/UI controls нужно перепроверять hover/focus/scroll behavior.
 - Popup sort/filter в `SelectedSegmentsPanel` завязаны на ручной viewport positioning; при изменениях размеров popup или кнопок нужно обновлять эвристики ширины/высоты и перепроверять поведение у краев экрана.
@@ -356,6 +360,81 @@
 ## 19. Update log
 
 ### Update log
+- Date: 2026-04-22
+- What was analyzed: `SelectedSegmentsPanel` click behavior для `.markButton` и `.jumpButton`, а также существующий portal-tooltip flow.
+- What was added/updated in context: прокрутка к segment теперь запускается только кнопкой `↗`; клик по карточке segment только активирует/раскрывает ее через `setActiveMarkIndex`. Для `↗` добавлен tooltip через `data-tooltip` и `getTooltipProps`.
+- Notes: `requestMarkNavigation` больше не вызывается из `.markButton`; navigation request flow в `Workspace` не менялся.
+
+- Date: 2026-04-22
+- What was analyzed: визуальное расположение `.progressLabel` и `.progressValue` в компактных progress cards.
+- What was added/updated in context: `.progressLabel` и `.progressValue` сделаны `display: block`, чтобы значение всегда отображалось отдельной строкой под label.
+- Notes: изменение только CSS-level в `Workspace.module.css`, без изменения счетчиков или навигации.
+
+- Date: 2026-04-22
+- What was analyzed: визуальный размер progress summary в `Workspace` после добавления четвертой карточки и навигации по неразмеченным репликам.
+- What was added/updated in context: progress cards сделаны компактнее через CSS: уменьшены gap, padding, border-radius, размер label/value и размер кнопок `↑`/`↓`.
+- Notes: изменение только визуальное в `Workspace.module.css`; счетчики и navigation logic не менялись.
+
+- Date: 2026-04-22
+- What was analyzed: `Workspace` double-click handler, который создавал `draftSelection` на всю реплику через `handleMessageDoubleClick`.
+- What was added/updated in context: double-click shortcut для выбора всей реплики удален; сегментирование теперь начинается только через обычное выделение текста мышью.
+- Notes: обычная selection-логика через `mouseup`, resize, edit mode и navigation flow не менялись.
+
+- Date: 2026-04-22
+- What was analyzed: программная прокрутка `messagesRef` к segment/unmarked message и необходимость визуально подтвердить целевую реплику после scroll.
+- What was added/updated in context: `Workspace` теперь хранит временный `highlightedMessageId` и добавляет CSS-анимацию `.messageRowScrollHighlight` к целевой реплике после scroll request.
+- Notes: подсветка живет примерно 1.4 секунды и сбрасывается таймером; selection/resize/edit logic не менялись.
+
+- Date: 2026-04-22
+- What was analyzed: текущий progress summary в `Workspace`, связь `marks.selectedSegment` с сообщениями и существующий внутренний scroll request для списка реплик.
+- What was added/updated in context: добавлен счетчик `Не размечено` для доступных сообщений без mark и стрелки `↑`/`↓`, которые прокручивают `messagesRef` к предыдущей/следующей неразмеченной реплике относительно текущего центра списка.
+- Notes: навигация по неразмеченным репликам использует локальный `requestMessageScroll`; role-based logic и модель marks не менялись.
+
+- Date: 2026-04-22
+- What was analyzed: размер блока `Draft selection` в `SelectedSegmentsPanel` и влияние длинного выделенного текста на удобство просмотра выбранных segments.
+- What was added/updated in context: `Draft selection` теперь отображается компактно по умолчанию: текст имеет ограниченную высоту и внутренний scroll, а кнопка `Развернуть` / `Свернуть` переключает расширенный просмотр.
+- Notes: изменение только UI-level в правой панели, без изменения draft selection state, создания segment или selection logic.
+
+- Date: 2026-04-22
+- What was analyzed: автопрокрутка при обычном клике по segment внутри `Workspace` после добавления navigation request flow.
+- What was added/updated in context: `Workspace` больше не использует `activeMarkIndex` как fallback-триггер прокрутки; scroll запускается только при новом `markNavigationRequest`, который приходит из правой панели.
+- Notes: клики по segment в центральном блоке теперь только активируют segment, а явная навигация из правой панели сохраняет прокрутку к нужной реплике.
+
+- Date: 2026-04-22
+- What was analyzed: почему после `requestMarkNavigation` центральный блок не прокручивался, хотя кнопка `↗` меняла navigation request.
+- What was added/updated in context: scroll-effect в `Workspace` теперь подписан на `markNavigationRequest` / `activeMarkIndex` и прокручивает именно внутренний контейнер `messagesRef` через расчет `scrollTop`, а не полагается только на `scrollIntoView` и изменения `visibleCount`.
+- Notes: причина была в том, что pending target записывался в ref, но эффект прокрутки не запускался, если нужное сообщение уже было в отрендеренном chunk и `visibleCount` не менялся.
+
+- Date: 2026-04-22
+- What was analyzed: отсутствие прокрутки по кнопке `↗` при клике на уже активный segment, текущая зависимость `Workspace` scroll effect только от изменения `activeMarkIndex`.
+- What was added/updated in context: добавлен отдельный navigation request flow: `requestMarkNavigation(markIndex)` в `AppContext` обновляет `activeMarkIndex` и инкрементирует `markNavigationRequest`, а `Workspace` реагирует на новый `requestId` как на one-shot request и прокручивает список реплик даже при повторном клике по тому же segment.
+- Notes: кнопка `↗` и клик по карточке в правой панели теперь используют `requestMarkNavigation`; chunk loading и существующий `scrollIntoView` flow сохранены.
+
+- Date: 2026-04-22
+- What was analyzed: `SelectedSegmentsPanel` actions per mark, существующая navigation через `setActiveMarkIndex` и `Workspace` scroll-to-segment effect.
+- What was added/updated in context: у каждого выбранного segment в правой панели добавлена отдельная кнопка `↗`, которая активирует исходный `markIndex` и запускает существующую прокрутку `Workspace` к связанному segment.
+- Notes: навигация использует уже существующий `activeMarkIndex` flow; карточка по-прежнему кликабельна, но теперь есть явный action button для scroll-to-segment.
+
+- Date: 2026-04-22
+- What was analyzed: текущий inline edit mode в `Workspace`, исчезновение segment highlights при редактировании, лишний `messageRowEditing` layout shift и сохранение текста через `editableRows`.
+- What was added/updated in context: edit mode теперь использует тот же segmented text rendering с подсветкой overlap/marks, но отключает интерактивные handles/context actions; текстовые изменения собираются в `editableRowsRef` до нажатия `Сохранить`, а отдельный editing min-height больше не применяется.
+- Notes: это делает переход в edit mode визуально ближе к обычному просмотру и уменьшает scroll/layout jump; после сохранения `saveEditedRows` по-прежнему пересобирает marks по текущей логике.
+
+- Date: 2026-04-22
+- What was analyzed: переключение `isEditingText` в `Workspace`, `displayedRows`, scroll container `messagesRef` и сценарий входа в edit mode из середины длинного списка.
+- What was added/updated in context: `Workspace` сохраняет `messagesRef.scrollTop` перед переключением edit mode и восстанавливает его после перерендера, чтобы список реплик не прыгал к началу.
+- Notes: изменение локальное для edit mode scroll preservation; right-panel navigation через `pendingScrollMessageIdRef` не менялась.
+
+- Date: 2026-04-22
+- What was analyzed: `Workspace` edit mode, `editableRows`, `saveEditedRows`, старый `textarea`-рендер и CSS `messageEditor`.
+- What was added/updated in context: edit mode переведен на inline `contentEditable` в визуальном формате обычного сообщения; `textarea` больше не показывается, а сохранение продолжает использовать текущий flow `editableRows -> saveEditedRows`.
+- Notes: contentEditable синхронизируется через `useLayoutEffect`, чтобы не перетирать курсор во время ввода; double click selection больше не используется.
+
+- Date: 2026-04-22
+- What was analyzed: `Workspace` toolbar, текущие `marks`, `entities`, `csvRows` и существующий portal-подход для overlay UI.
+- What was added/updated in context: добавлена кнопка `Показать результат` в верхний toolbar; она открывает modal с JSON snapshot результата текущей разметки (`totalMessages`, `totalSegments`, `segments` с entity, offsets, text, message ranges, fields и visibility flags).
+- Notes: это UI-preview результата, без изменения shape `marks`, без backend/API export и без влияния на selection/resize/edit/navigation flow.
+
 - Date: 2026-04-16
 - What was analyzed: line wrapping instability when segment boundary splits a word into multiple inline spans during overlap/end-resize.
 - What was added/updated in context: `Workspace` now groups adjacent non-space rendered text parts into word chunks, so a word remains one no-break inline unit even when several segment slices/overlays cover different characters inside it; boundary handles are limited to the first/last non-space split of the original segment part to avoid duplicate borders on every word.

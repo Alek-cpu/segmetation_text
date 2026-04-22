@@ -36,6 +36,7 @@ type AppContextValue = {
   messageOffsets: MessageOffset[];
   marks: Mark[];
   activeMarkIndex: number | null;
+  markNavigationRequest: { markIndex: number; requestId: number } | null;
   draftSelection: DraftSelection;
   isRoleAllowedForSegmentation: (role: string) => boolean;
   canCreateMarkFromDraftSelection: boolean;
@@ -48,6 +49,7 @@ type AppContextValue = {
   setRightPanelWidth: (value: number) => void;
   setMarks: (marks: Mark[]) => void;
   setActiveMarkIndex: (value: number | null) => void;
+  requestMarkNavigation: (markIndex: number) => void;
   setDraftSelection: (selection: DraftSelection) => void;
   createMarkFromDraftSelection: (entity: Entity) => void;
   removeMark: (markIndex: number) => void;
@@ -77,6 +79,7 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [rightPanelWidth, setRightPanelWidth] = useState(RIGHT_SIDEBAR_WIDTH);
   const [marks, setMarks] = useState<Mark[]>([]);
   const [activeMarkIndex, setActiveMarkIndex] = useState<number | null>(null);
+  const [markNavigationRequest, setMarkNavigationRequest] = useState<{ markIndex: number; requestId: number } | null>(null);
   const [draftSelection, setDraftSelection] = useState<DraftSelection>(initialDraftSelection);
 
   useEffect(() => {
@@ -246,6 +249,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       messageOffsets,
       marks,
       activeMarkIndex,
+      markNavigationRequest,
       draftSelection,
       isRoleAllowedForSegmentation,
       canCreateMarkFromDraftSelection,
@@ -258,6 +262,13 @@ export function AppProvider({ children }: PropsWithChildren) {
       setRightPanelWidth,
       setMarks,
       setActiveMarkIndex,
+      requestMarkNavigation: (markIndex) => {
+        setActiveMarkIndex(markIndex);
+        setMarkNavigationRequest((currentRequest) => ({
+          markIndex,
+          requestId: (currentRequest?.requestId ?? 0) + 1,
+        }));
+      },
       setDraftSelection,
       createMarkFromDraftSelection: (entity) => {
         if (
@@ -451,6 +462,7 @@ export function AppProvider({ children }: PropsWithChildren) {
         setRightPanelWidth(RIGHT_SIDEBAR_WIDTH);
         setMarks([]);
         setActiveMarkIndex(null);
+        setMarkNavigationRequest(null);
         setDraftSelection(initialDraftSelection);
       },
     }),
@@ -466,6 +478,7 @@ export function AppProvider({ children }: PropsWithChildren) {
       messageOffsets,
       marks,
       activeMarkIndex,
+      markNavigationRequest,
       draftSelection,
       canCreateMarkFromDraftSelection,
       segmentationProgress,

@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FocusEvent as ReactFocusEvent,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useAppContext } from '../context/AppContext';
 import { getEntityColor } from '../utils/messageMarks';
@@ -34,6 +41,7 @@ export function SelectedSegmentsPanel() {
     activeMarkIndex,
     removeMark,
     setActiveMarkIndex,
+    requestMarkNavigation,
     toggleGlobalMarksVisibility,
     toggleMarkVisibility,
     updateMarkFieldValue,
@@ -42,6 +50,7 @@ export function SelectedSegmentsPanel() {
   const [sortMode, setSortMode] = useState<SortMode>('newest');
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isDraftSelectionExpanded, setIsDraftSelectionExpanded] = useState(false);
   const [filteredEntityIds, setFilteredEntityIds] = useState<string[]>([]);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [sortMenuPosition, setSortMenuPosition] = useState<PopupPosition | null>(null);
@@ -144,6 +153,10 @@ export function SelectedSegmentsPanel() {
     };
   }, []);
 
+  useEffect(() => {
+    setIsDraftSelectionExpanded(false);
+  }, [draftSelection.start, draftSelection.finish]);
+
   const toggleExpanded = (markIndex: number) => {
     setExpandedMarkIndex((currentIndex) => (currentIndex === markIndex ? null : markIndex));
   };
@@ -181,7 +194,7 @@ export function SelectedSegmentsPanel() {
     });
   };
 
-  const showTooltip = (event: ReactMouseEvent<HTMLElement>) => {
+  const showTooltip = (event: ReactMouseEvent<HTMLElement> | ReactFocusEvent<HTMLElement>) => {
     const text = event.currentTarget.dataset.tooltip;
 
     if (!text) {
@@ -259,12 +272,31 @@ export function SelectedSegmentsPanel() {
 
         {draftSelection.start !== null && draftSelection.finish !== null ? (
           <div className={styles.selectionSummary}>
-            <p className={styles.selectionTitle}>Draft selection</p>
+            <div className={styles.selectionHeader}>
+              <p className={styles.selectionTitle}>Draft selection</p>
+              <button
+                type="button"
+                className={styles.selectionToggle}
+                onClick={() => setIsDraftSelectionExpanded((isExpanded) => !isExpanded)}
+                aria-expanded={isDraftSelectionExpanded}
+              >
+                {isDraftSelectionExpanded ? 'Свернуть' : 'Развернуть'}
+              </button>
+            </div>
             <p className={styles.selectionMeta}>
               start: {draftSelection.start}, finish: {draftSelection.finish}, messages:{' '}
               {draftSelection.messageIds.length}
             </p>
-            <p className={styles.selectionText}>{draftSelection.selectedText}</p>
+            <p
+              className={[
+                styles.selectionText,
+                isDraftSelectionExpanded ? styles.selectionTextExpanded : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              {draftSelection.selectedText}
+            </p>
           </div>
         ) : null}
 
@@ -313,6 +345,22 @@ export function SelectedSegmentsPanel() {
                     </div>
 
                     <div className={styles.actions}>
+                      <button
+                        type="button"
+                        className={styles.jumpButton}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          requestMarkNavigation(markIndex);
+                        }}
+                        aria-label="Прокрутить к сегменту"
+                        data-tooltip="Прокрутить к сегменту"
+                        onMouseEnter={showTooltip}
+                        onMouseLeave={hideTooltip}
+                        onFocus={showTooltip}
+                        onBlur={hideTooltip}
+                      >
+                        ↗
+                      </button>
                       <button
                         type="button"
                         className={styles.eyeButton}

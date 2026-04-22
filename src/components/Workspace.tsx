@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import styles from './Workspace.module.css';
 import { useAppContext } from '../context/AppContext';
@@ -9,7 +9,7 @@ import {
   getEmptyDraftSelection,
   getGlobalOffsetFromPoint,
 } from '../utils/selection';
-import type { Mark, MessageOffset } from '../types/app';
+import type { Mark } from '../types/app';
 
 const INITIAL_VISIBLE_MESSAGES = 25;
 const VISIBLE_MESSAGES_STEP = 25;
@@ -26,6 +26,11 @@ type DeleteOverlayState = {
   markIndex: number;
   top: number;
   left: number;
+};
+
+type MessageScrollRequest = {
+  messageId: string;
+  requestId: number;
 };
 
 type TextRenderPart = {
@@ -86,6 +91,7 @@ export function Workspace() {
     messageOffsets,
     fullPlainText,
     activeMarkIndex,
+    markNavigationRequest,
     draftSelection,
     setDraftSelection,
     marks,
@@ -99,13 +105,20 @@ export function Workspace() {
   } = useAppContext();
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollMessageIdRef = useRef<string | null>(null);
+  const lastNavigationRequestIdRef = useRef<number | null>(null);
+  const pendingMessagesScrollTopRef = useRef<number | null>(null);
+  const highlightTimeoutRef = useRef<number | null>(null);
   const deleteOverlayRef = useRef<HTMLButtonElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
+  const editableRowsRef = useRef(csvRows);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [deleteOverlay, setDeleteOverlay] = useState<DeleteOverlayState | null>(null);
   const [isEditingText, setIsEditingText] = useState(false);
+  const [isResultOpen, setIsResultOpen] = useState(false);
   const [editableRows, setEditableRows] = useState(csvRows);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_MESSAGES);
+  const [messageScrollRequest, setMessageScrollRequest] = useState<MessageScrollRequest | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
 
   const displayedRows = isEditingText ? editableRows : csvRows;
   const visibleRows = displayedRows.slice(0, visibleCount);
@@ -113,6 +126,40 @@ export function Workspace() {
   const entityNameById = useMemo(() => {
     return new Map(entities.map((entity) => [entity.id, entity.name]));
   }, [entities]);
+  const resultPayload = useMemo(() => ({
+    totalMessages: csvRows.length,
+    totalSegments: marks.length,
+    segments: marks.map((mark, markIndex) => ({
+      index: markIndex,
+      entityId: mark.entityId,
+      entityName: entityNameById.get(mark.entityId) ?? mark.entityId,
+      type: mark.type,
+      position: mark.position,
+      text: mark.text,
+      selectedSegment: mark.selectedSegment,
+      messageRanges: mark.messageRanges,
+      fields: mark.fields,
+      hidden: mark.hidden,
+      forceVisible: mark.forceVisible,
+    })),
+  }), [csvRows.length, entityNameById, marks]);
+  const resultJson = useMemo(() => JSON.stringify(resultPayload, null, 2), [resultPayload]);
+  const markedMessageIds = useMemo(() => {
+    return new Set(marks.flatMap((mark) => mark.selectedSegment));
+  }, [marks]);
+  const unmarkedRows = useMemo(() => {
+    return displayedRows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => isRoleAllowedForSegmentation(row.usertype) && !markedMessageIds.has(row.messageid));
+  }, [displayedRows, isRoleAllowedForSegmentation, markedMessageIds]);
+
+  const requestMessageScroll = useCallback((messageId: string) => {
+    pendingScrollMessageIdRef.current = messageId;
+    setMessageScrollRequest((currentRequest) => ({
+      messageId,
+      requestId: (currentRequest?.requestId ?? 0) + 1,
+    }));
+  }, []);
 
   const getAllowedSegmentationBoundsForMark = useCallback((markIndex: number) => {
     const targetMark = marks[markIndex];
@@ -193,8 +240,21 @@ export function Workspace() {
   useEffect(() => {
     if (!isEditingText) {
       setEditableRows(csvRows);
+      editableRowsRef.current = csvRows;
     }
   }, [csvRows, isEditingText]);
+
+  useLayoutEffect(() => {
+    const pendingScrollTop = pendingMessagesScrollTopRef.current;
+    const container = messagesRef.current;
+
+    if (pendingScrollTop === null || !container) {
+      return;
+    }
+
+    container.scrollTop = Math.min(pendingScrollTop, container.scrollHeight - container.clientHeight);
+    pendingMessagesScrollTopRef.current = null;
+  }, [isEditingText]);
 
   useEffect(() => {
     const handleDocumentMouseDown = (event: globalThis.MouseEvent) => {
@@ -210,6 +270,7 @@ export function Workspace() {
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setDeleteOverlay(null);
+        setIsResultOpen(false);
       }
     };
 
@@ -219,6 +280,14 @@ export function Workspace() {
     return () => {
       document.removeEventListener('mousedown', handleDocumentMouseDown);
       window.removeEventListener('keydown', handleEscape);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current !== null) {
+        window.clearTimeout(highlightTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -242,16 +311,20 @@ export function Workspace() {
   }, [displayedRows.length]);
 
   useEffect(() => {
-    if (activeMarkIndex === null) {
-      pendingScrollMessageIdRef.current = null;
+    if (!markNavigationRequest || markNavigationRequest.requestId === lastNavigationRequestIdRef.current) {
       return;
     }
 
-    const targetMark = marks[activeMarkIndex];
+    lastNavigationRequestIdRef.current = markNavigationRequest.requestId;
+
+    const targetMarkIndex = markNavigationRequest.markIndex;
+    const targetMark = marks[targetMarkIndex];
     const targetMessageId = targetMark?.selectedSegment[0];
 
-    pendingScrollMessageIdRef.current = targetMessageId ?? null;
-  }, [activeMarkIndex, marks]);
+    if (targetMessageId) {
+      requestMessageScroll(targetMessageId);
+    }
+  }, [markNavigationRequest, marks, requestMessageScroll]);
 
   useEffect(() => {
     const targetMessageId = pendingScrollMessageIdRef.current;
@@ -275,19 +348,42 @@ export function Workspace() {
     }
 
     requestAnimationFrame(() => {
-      const targetElement = messagesRef.current?.querySelector<HTMLElement>(`[data-message-id="${targetMessageId}"]`);
+      const container = messagesRef.current;
+      const targetElement = Array.from(container?.querySelectorAll<HTMLElement>('[data-message-id]') ?? []).find(
+        (element) => element.dataset.messageId === targetMessageId,
+      );
 
-      if (!targetElement) {
+      if (!container || !targetElement) {
         return;
       }
 
-      targetElement.scrollIntoView({
+      const containerRect = container.getBoundingClientRect();
+      const targetRect = targetElement.getBoundingClientRect();
+      const centeredScrollTop =
+        container.scrollTop +
+        targetRect.top -
+        containerRect.top -
+        container.clientHeight / 2 +
+        targetElement.clientHeight / 2;
+
+      container.scrollTo({
+        top: Math.max(0, centeredScrollTop),
         behavior: 'smooth',
-        block: 'center',
       });
+      setHighlightedMessageId(targetMessageId);
+
+      if (highlightTimeoutRef.current !== null) {
+        window.clearTimeout(highlightTimeoutRef.current);
+      }
+
+      highlightTimeoutRef.current = window.setTimeout(() => {
+        setHighlightedMessageId(null);
+        highlightTimeoutRef.current = null;
+      }, 1400);
+
       pendingScrollMessageIdRef.current = null;
     });
-  }, [displayedRows, visibleCount]);
+  }, [displayedRows, messageScrollRequest, visibleCount]);
 
   const handleMessagesScroll = () => {
     const container = messagesRef.current;
@@ -315,8 +411,55 @@ export function Workspace() {
     );
   };
 
+  const getCurrentMessageIndex = () => {
+    const container = messagesRef.current;
+
+    if (!container) {
+      return 0;
+    }
+
+    const containerCenter = container.getBoundingClientRect().top + container.clientHeight / 2;
+    const visibleMessageElements = Array.from(container.querySelectorAll<HTMLElement>('[data-message-id]'));
+    let closestIndex = 0;
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    visibleMessageElements.forEach((element) => {
+      const messageId = element.dataset.messageId;
+      const rowIndex = displayedRows.findIndex((row) => row.messageid === messageId);
+
+      if (rowIndex === -1) {
+        return;
+      }
+
+      const rect = element.getBoundingClientRect();
+      const elementCenter = rect.top + rect.height / 2;
+      const distance = Math.abs(elementCenter - containerCenter);
+
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestIndex = rowIndex;
+      }
+    });
+
+    return closestIndex;
+  };
+
+  const handleUnmarkedNavigation = (direction: 'previous' | 'next') => {
+    if (unmarkedRows.length === 0) {
+      return;
+    }
+
+    const currentIndex = getCurrentMessageIndex();
+    const target =
+      direction === 'next'
+        ? unmarkedRows.find(({ index }) => index > currentIndex) ?? unmarkedRows[0]
+        : [...unmarkedRows].reverse().find(({ index }) => index < currentIndex) ?? unmarkedRows[unmarkedRows.length - 1];
+
+    requestMessageScroll(target.row.messageid);
+  };
+
   const handleMouseUp = (_event: MouseEvent<HTMLDivElement>) => {
-    if (dragStateRef.current) {
+    if (dragStateRef.current || isEditingText) {
       return;
     }
 
@@ -364,25 +507,25 @@ export function Workspace() {
     );
   }, [globalHidden, previewMarks]);
 
-  const handleMessageDoubleClick = (offset: MessageOffset) => {
-    setDraftSelection({
-      entityId: null,
-      selectedText: offset.text,
-      start: offset.start,
-      finish: offset.end,
-      messageIds: [offset.messageId],
-    });
-  };
-
   const handleEditToggle = () => {
+    pendingMessagesScrollTopRef.current = messagesRef.current?.scrollTop ?? null;
+
     if (isEditingText) {
-      saveEditedRows(editableRows);
+      saveEditedRows(editableRowsRef.current);
+      setEditableRows(editableRowsRef.current);
       setIsEditingText(false);
       return;
     }
 
+    editableRowsRef.current = csvRows;
     setEditableRows(csvRows);
     setIsEditingText(true);
+  };
+
+  const updateEditableRowText = (messageId: string, text: string) => {
+    editableRowsRef.current = editableRowsRef.current.map((row) =>
+      row.messageid === messageId ? { ...row, text } : row,
+    );
   };
 
   const handleResizeStart = (params: { markIndex: number; edge: 'start' | 'finish' }) => {
@@ -516,15 +659,18 @@ export function Workspace() {
     setDeleteOverlay(null);
   };
 
-  const renderTextPart = (renderPart: TextRenderPart) => {
+  const renderTextPart = (renderPart: TextRenderPart, options: { interactive?: boolean } = {}) => {
     const { part, text, key, showStartBoundary, showEndBoundary } = renderPart;
+    const isInteractive = options.interactive ?? true;
 
     if (!part.isMarked) {
       return <span key={key}>{text}</span>;
     }
 
-    const hasStartBoundary = showStartBoundary && part.hasStartBorder && part.startBoundaryMarkIndex !== undefined;
-    const hasEndBoundary = showEndBoundary && part.hasEndBorder && part.endBoundaryMarkIndex !== undefined;
+    const hasStartBoundary =
+      isInteractive && showStartBoundary && part.hasStartBorder && part.startBoundaryMarkIndex !== undefined;
+    const hasEndBoundary =
+      isInteractive && showEndBoundary && part.hasEndBorder && part.endBoundaryMarkIndex !== undefined;
     const startBoundaryMarkIndex = part.startBoundaryMarkIndex;
     const endBoundaryMarkIndex = part.endBoundaryMarkIndex;
 
@@ -553,12 +699,12 @@ export function Workspace() {
           .filter(Boolean)
           .join(' + ')}
         onClick={() => {
-          if (part.markIndex !== undefined) {
+          if (isInteractive && part.markIndex !== undefined) {
             setActiveMarkIndex(part.markIndex);
           }
         }}
         onContextMenu={(event) => {
-          if (part.markIndex !== undefined) {
+          if (isInteractive && part.markIndex !== undefined) {
             handleMarkedSegmentContextMenu(event, part.markIndex);
           }
         }}
@@ -617,6 +763,9 @@ export function Workspace() {
           <button type="button" className={styles.editButton} onClick={handleEditToggle}>
             {isEditingText ? 'Сохранить' : 'Редактировать текст'}
           </button>
+          <button type="button" className={styles.resultButton} onClick={() => setIsResultOpen(true)}>
+            Показать результат
+          </button>
           <span className={styles.badge}>Сообщений: {csvRows.length}</span>
           <span className={styles.badge}>Разметка ролей: {allowedRolesForSegmentation.join(', ')}</span>
           {error ? <span className={styles.errorBadge}>Ошибка: {error}</span> : null}
@@ -634,6 +783,34 @@ export function Workspace() {
           <div className={styles.progressItem}>
             <span className={styles.progressLabel}>Размечено</span>
             <strong className={styles.progressValue}>{segmentationProgress.markedMessages}</strong>
+          </div>
+          <div className={[styles.progressItem, styles.progressItemWithActions].join(' ')}>
+            <div>
+              <span className={styles.progressLabel}>Не размечено</span>
+              <strong className={styles.progressValue}>{unmarkedRows.length}</strong>
+            </div>
+            <div className={styles.unmarkedNavigation}>
+              <button
+                type="button"
+                className={styles.unmarkedNavigationButton}
+                onClick={() => handleUnmarkedNavigation('previous')}
+                disabled={unmarkedRows.length === 0}
+                aria-label="Перейти к предыдущей неразмеченной реплике"
+                title="Предыдущая неразмеченная реплика"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className={styles.unmarkedNavigationButton}
+                onClick={() => handleUnmarkedNavigation('next')}
+                disabled={unmarkedRows.length === 0}
+                aria-label="Перейти к следующей неразмеченной реплике"
+                title="Следующая неразмеченная реплика"
+              >
+                ↓
+              </button>
+            </div>
           </div>
         </div>
 
@@ -656,17 +833,12 @@ export function Workspace() {
                 key={row.messageid}
                 className={[
                   styles.messageRow,
-                  isEditingText ? styles.messageRowEditing : '',
                   isSelected ? styles.messageRowSelected : '',
+                  highlightedMessageId === row.messageid ? styles.messageRowScrollHighlight : '',
                   !isSegmentationAllowed ? styles.messageRowDisabled : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
-                onDoubleClick={() => {
-                  if (offset) {
-                    handleMessageDoubleClick(offset);
-                  }
-                }}
                 data-message-id={row.messageid}
                 data-row-id={row.ID}
                 data-offset-start={offset?.start ?? -1}
@@ -677,19 +849,32 @@ export function Workspace() {
                 <div className={styles.userType}>{row.usertype}</div>
                 <div className={styles.messageContent}>
                   {isEditingText ? (
-                    <textarea
-                      className={styles.messageEditor}
-                      value={row.text}
-                      onChange={(event) => {
-                        setEditableRows((currentRows) =>
-                          currentRows.map((currentRow) =>
-                            currentRow.messageid === row.messageid
-                              ? { ...currentRow, text: event.target.value }
-                              : currentRow,
-                          ),
-                        );
+                    <p
+                      className={[styles.messageText, styles.messageEditable].join(' ')}
+                      contentEditable
+                      role="textbox"
+                      aria-label="Редактировать текст сообщения"
+                      suppressContentEditableWarning
+                      onInput={(event) => {
+                        updateEditableRowText(row.messageid, event.currentTarget.textContent ?? '');
                       }}
-                    />
+                    >
+                      {messageParts.length > 0
+                        ? buildWordChunks(messageParts).map((chunk, chunkIndex) => {
+                            const content = chunk.parts.map((part) => renderTextPart(part, { interactive: false }));
+
+                            if (chunk.type === 'space') {
+                              return content;
+                            }
+
+                            return (
+                              <span className={styles.wordChunk} key={`${row.messageid}-edit-word-${chunkIndex}`}>
+                                {content}
+                              </span>
+                            );
+                          })
+                        : row.text}
+                    </p>
                   ) : (
                     <p className={styles.messageText} data-selectable-text="true">
                       {messageParts.length > 0
@@ -729,6 +914,32 @@ export function Workspace() {
             >
               Удалить
             </button>,
+            document.body,
+          )
+        : null}
+      {isResultOpen
+        ? createPortal(
+            <div className={styles.resultOverlay} role="dialog" aria-modal="true" aria-labelledby="result-title">
+              <div className={styles.resultPanel}>
+                <div className={styles.resultHeader}>
+                  <div>
+                    <h2 id="result-title" className={styles.resultTitle}>Результат разметки</h2>
+                    <p className={styles.resultMeta}>
+                      Сегментов: {resultPayload.totalSegments} · Сообщений: {resultPayload.totalMessages}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className={styles.resultCloseButton}
+                    aria-label="Закрыть результат"
+                    onClick={() => setIsResultOpen(false)}
+                  >
+                    ×
+                  </button>
+                </div>
+                <pre className={styles.resultPre}>{resultJson}</pre>
+              </div>
+            </div>,
             document.body,
           )
         : null}
