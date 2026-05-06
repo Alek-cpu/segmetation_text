@@ -4,13 +4,29 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type PropsWithChildren,
 } from 'react';
-import entitiesMock from '../../mocks/entities.json';
-import csvMockSource from '../../mocks/0b2a5a2a058e4df59b344416a45bc259.csv?raw';
-import type { CsvRow, DraftSelection, EntitiesMock, Entity, Mark, MessageOffset } from '../types/app';
+import type { CsvRow, DraftSelection, Entity, Mark, MessageOffset } from '../types/app';
+import {
+  debugTagMePremarkup,
+  debugTagMeEvent,
+  getTagMeCsv,
+  getDevelopmentModeFlag,
+  getDemoModeFlag,
+  getTagMeEntities,
+  getTagMePremarkup,
+  getTagMeRoleRules,
+  getProgressToolFlag,
+  isRealTagMeEnvironment,
+  registerTagMeSubmit,
+  registerTagMeValidate,
+  warnTagMePremarkup,
+} from '../integrations/tagme/tagmeApi';
+import type { TagMeRoleRules, TagMeSubmitResult } from '../integrations/tagme/tagmeTypes';
 import { getEmptyDraftSelection } from '../utils/selection';
+import { getPremarkupMarksCandidateCount, normalizePremarkupMarks } from '../utils/premarkup';
 import { LEFT_SIDEBAR_WIDTH, RIGHT_SIDEBAR_WIDTH } from '../utils/constants';
 import {
   buildMarkRangePayload,
@@ -38,6 +54,8 @@ type AppContextValue = {
   activeMarkIndex: number | null;
   markNavigationRequest: { markIndex: number; requestId: number } | null;
   draftSelection: DraftSelection;
+  isDevelopmentMode: boolean;
+  isProgressToolEnabled: boolean;
   isRoleAllowedForSegmentation: (role: string) => boolean;
   canCreateMarkFromDraftSelection: boolean;
   setCsvRows: (rows: CsvRow[]) => void;
@@ -69,6 +87,61 @@ type AppContextValue = {
 const initialDraftSelection = getEmptyDraftSelection();
 const AppContext = createContext<AppContextValue | null>(null);
 
+function buildSubmitResult(params: {
+  csvRows: CsvRow[];
+  entities: Entity[];
+  marks: Mark[];
+  source: TagMeSubmitResult['source'];
+}): TagMeSubmitResult {
+  const entityNameById = new Map(params.entities.map((entity) => [entity.id, entity.name]));
+
+  return {
+    totalMessages: params.csvRows.length,
+    totalSegments: params.marks.length,
+    segments: params.marks.map((mark, markIndex) => ({
+      index: markIndex,
+      entityId: mark.entityId,
+      entityName: entityNameById.get(mark.entityId) ?? mark.entityId,
+      type: mark.type,
+      position: mark.position,
+      text: mark.text,
+      selectedSegment: mark.selectedSegment,
+      messageRanges: mark.messageRanges,
+      fields: mark.fields,
+      hidden: mark.hidden,
+      forceVisible: mark.forceVisible,
+    })),
+    marks: params.marks,
+    source: params.source,
+  };
+}
+
+function getRowRole(row: CsvRow) {
+  const rowWithRoleAliases = row as CsvRow & Partial<Record<'role' | 'source' | 'Источник', string>>;
+
+  return rowWithRoleAliases.role ?? rowWithRoleAliases.source ?? row.usertype ?? rowWithRoleAliases['Источник'] ?? '';
+}
+
+function getUniqueCsvRoles(rows: CsvRow[]) {
+  return [...new Set(rows.map(getRowRole).filter(Boolean))];
+}
+
+function resolveAllowedRoles(rows: CsvRow[], roleRules: TagMeRoleRules) {
+  const allRoles = getUniqueCsvRoles(rows);
+
+  if (roleRules.rolesForMarking && roleRules.rolesForMarking.length > 0) {
+    return roleRules.rolesForMarking;
+  }
+
+  if (roleRules.rolesForNotMarking && roleRules.rolesForNotMarking.length > 0) {
+    const deniedRoles = new Set(roleRules.rolesForNotMarking);
+
+    return allRoles.filter((role) => !deniedRoles.has(role));
+  }
+
+  return allRoles;
+}
+
 export function AppProvider({ children }: PropsWithChildren) {
   const [csvRows, setCsvRows] = useState<CsvRow[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -81,27 +154,102 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [activeMarkIndex, setActiveMarkIndex] = useState<number | null>(null);
   const [markNavigationRequest, setMarkNavigationRequest] = useState<{ markIndex: number; requestId: number } | null>(null);
   const [draftSelection, setDraftSelection] = useState<DraftSelection>(initialDraftSelection);
+  const [isDevelopmentMode, setIsDevelopmentMode] = useState(false);
+  const [isProgressToolEnabled, setIsProgressToolEnabled] = useState(false);
+  const [roleRules, setRoleRules] = useState<TagMeRoleRules>({
+    rolesForMarking: null,
+    rolesForNotMarking: null,
+  });
+  const tagMeSourceRef = useRef<TagMeSubmitResult['source']>(isRealTagMeEnvironment() ? 'real-tagme' : 'mock-tagme');
+  const marksRef = useRef<Mark[]>([]);
+  const submitResultRef = useRef<TagMeSubmitResult>(buildSubmitResult({
+    csvRows: [],
+    entities: [],
+    marks: [],
+    source: tagMeSourceRef.current,
+  }));
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadInitialData() {
+      try {
+        setLoading(true);
+        setError(null);
+        debugTagMeEvent('app init started');
+        debugTagMeEvent('demoMode detected', getDemoModeFlag());
+
+        const [csvSource, tagMeEntities] = await Promise.all([
+          getTagMeCsv(),
+          getTagMeEntities(),
+        ]);
+        debugTagMeEvent('csv loaded', csvSource.length);
+        debugTagMeEvent('entities loaded', tagMeEntities.length);
+
+        if (isCancelled) {
+          return;
+        }
+
+        const parsedCsv = Papa.parse<CsvRow>(csvSource, {
+          header: true,
+          skipEmptyLines: true,
+        });
+
+        if (parsedCsv.errors.length > 0) {
+          throw new Error(parsedCsv.errors[0].message);
+        }
+
+        tagMeSourceRef.current = isRealTagMeEnvironment() ? 'real-tagme' : 'mock-tagme';
+        setCsvRows(parsedCsv.data);
+        setEntities(tagMeEntities);
+        setRoleRules(getTagMeRoleRules());
+        setIsDevelopmentMode(getDevelopmentModeFlag());
+        setIsProgressToolEnabled(getProgressToolFlag());
+
+        const rawPremarkup = getTagMePremarkup();
+        const premarkupMarks = normalizePremarkupMarks(rawPremarkup);
+        const invalidPremarkupMarksCount = Math.max(
+          getPremarkupMarksCandidateCount(rawPremarkup) - premarkupMarks.length,
+          0,
+        );
+
+        debugTagMePremarkup('raw', rawPremarkup);
+        debugTagMePremarkup('normalized count', premarkupMarks.length);
+        debugTagMePremarkup('invalid marks count', invalidPremarkupMarksCount);
+
+        if (invalidPremarkupMarksCount > 0) {
+          warnTagMePremarkup('invalid marks filtered', invalidPremarkupMarksCount);
+        }
+
+        if (premarkupMarks.length > 0) {
+          setMarks(premarkupMarks);
+        }
+        debugTagMeEvent('app init finished');
+      } catch (loadError) {
+        if (!isCancelled) {
+          setError(loadError instanceof Error ? loadError.message : 'Не удалось загрузить mock-данные.');
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+          debugTagMeEvent('loading false');
+        }
+      }
+    }
+
+    void loadInitialData();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     try {
-      setLoading(true);
-      setError(null);
-
-      const parsedCsv = Papa.parse<CsvRow>(csvMockSource, {
-        header: true,
-        skipEmptyLines: true,
-      });
-
-      if (parsedCsv.errors.length > 0) {
-        throw new Error(parsedCsv.errors[0].message);
-      }
-
-      setCsvRows(parsedCsv.data);
-      setEntities((entitiesMock as EntitiesMock).entities);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Не удалось загрузить mock-данные.');
-    } finally {
-      setLoading(false);
+      registerTagMeValidate(() => marksRef.current);
+      registerTagMeSubmit(() => submitResultRef.current);
+    } catch (registrationError) {
+      setError(registrationError instanceof Error ? registrationError.message : 'Не удалось зарегистрировать TagMe callbacks.');
     }
   }, []);
 
@@ -137,8 +285,8 @@ export function AppProvider({ children }: PropsWithChildren) {
   }, [csvRows]);
 
   const allowedRolesForSegmentation = useMemo(() => {
-    return [...new Set(csvRows.map((row) => row.usertype).filter(Boolean))];
-  }, [csvRows]);
+    return resolveAllowedRoles(csvRows, roleRules);
+  }, [csvRows, roleRules]);
 
   const isRoleAllowedForSegmentation = (role: string) => {
     return allowedRolesForSegmentation.includes(role);
@@ -166,7 +314,7 @@ export function AppProvider({ children }: PropsWithChildren) {
     while (startIndex > 0) {
       const previousRow = csvRows[startIndex - 1];
 
-      if (!previousRow || !isRoleAllowedForSegmentation(previousRow.usertype)) {
+      if (!previousRow || !isRoleAllowedForSegmentation(getRowRole(previousRow))) {
         break;
       }
 
@@ -176,7 +324,7 @@ export function AppProvider({ children }: PropsWithChildren) {
     while (finishIndex < csvRows.length - 1) {
       const nextRow = csvRows[finishIndex + 1];
 
-      if (!nextRow || !isRoleAllowedForSegmentation(nextRow.usertype)) {
+      if (!nextRow || !isRoleAllowedForSegmentation(getRowRole(nextRow))) {
         break;
       }
 
@@ -212,18 +360,18 @@ export function AppProvider({ children }: PropsWithChildren) {
     return draftSelection.messageIds.every((messageId) => {
       const row = csvRows.find((item) => item.messageid === messageId);
 
-      return row ? isRoleAllowedForSegmentation(row.usertype) : false;
+      return row ? isRoleAllowedForSegmentation(getRowRole(row)) : false;
     });
-  }, [csvRows, draftSelection]);
+  }, [allowedRolesForSegmentation, csvRows, draftSelection]);
 
   const segmentationProgress = useMemo(() => {
     const totalMessages = csvRows.length;
-    const availableMessages = csvRows.filter((row) => isRoleAllowedForSegmentation(row.usertype)).length;
+    const availableMessages = csvRows.filter((row) => isRoleAllowedForSegmentation(getRowRole(row))).length;
     const markedMessageIds = new Set(
       marks.flatMap((mark) => mark.selectedSegment).filter((messageId) => {
         const row = csvRows.find((item) => item.messageid === messageId);
 
-        return row ? isRoleAllowedForSegmentation(row.usertype) : false;
+        return row ? isRoleAllowedForSegmentation(getRowRole(row)) : false;
       }),
     );
 
@@ -232,7 +380,17 @@ export function AppProvider({ children }: PropsWithChildren) {
       availableMessages,
       markedMessages: markedMessageIds.size,
     };
-  }, [csvRows, marks]);
+  }, [allowedRolesForSegmentation, csvRows, marks]);
+
+  const tagMeSubmitResult = useMemo(() => buildSubmitResult({
+    csvRows,
+    entities,
+    marks,
+    source: tagMeSourceRef.current,
+  }), [csvRows, entities, marks]);
+
+  marksRef.current = marks;
+  submitResultRef.current = tagMeSubmitResult;
 
   const value = useMemo<AppContextValue>(
     () => ({
@@ -251,6 +409,8 @@ export function AppProvider({ children }: PropsWithChildren) {
       activeMarkIndex,
       markNavigationRequest,
       draftSelection,
+      isDevelopmentMode,
+      isProgressToolEnabled,
       isRoleAllowedForSegmentation,
       canCreateMarkFromDraftSelection,
       setCsvRows,
@@ -464,6 +624,12 @@ export function AppProvider({ children }: PropsWithChildren) {
         setActiveMarkIndex(null);
         setMarkNavigationRequest(null);
         setDraftSelection(initialDraftSelection);
+        setIsDevelopmentMode(false);
+        setIsProgressToolEnabled(false);
+        setRoleRules({
+          rolesForMarking: null,
+          rolesForNotMarking: null,
+        });
       },
     }),
     [
@@ -480,6 +646,9 @@ export function AppProvider({ children }: PropsWithChildren) {
       activeMarkIndex,
       markNavigationRequest,
       draftSelection,
+      isDevelopmentMode,
+      isProgressToolEnabled,
+      allowedRolesForSegmentation,
       canCreateMarkFromDraftSelection,
       segmentationProgress,
     ],

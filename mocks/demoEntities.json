@@ -1,0 +1,94 @@
+{
+  "entities": [
+    {
+      "id": "demo:insufficient-context",
+      "name": "Demo | Недостаточно контекста",
+      "fields": [
+        {
+          "type": "checkbox",
+          "name": "category",
+          "title": "Категория",
+          "options": [
+            { "title": "Продажа", "value": "Продажа" },
+            { "title": "Компенсация", "value": "Компенсация" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "demo:tariff-consultation",
+      "name": "Demo | Консультация по тарифу",
+      "fields": [
+        {
+          "type": "checkbox",
+          "name": "category",
+          "title": "Категория",
+          "options": [
+            { "title": "Продажа", "value": "Продажа" },
+            { "title": "Компенсация", "value": "Компенсация" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "demo:compensation-request",
+      "name": "Demo | Запрос компенсации",
+      "fields": [
+        {
+          "type": "checkbox",
+          "name": "category",
+          "title": "Категория",
+          "options": [
+            { "title": "Продажа", "value": "Продажа" },
+            { "title": "Компенсация", "value": "Компенсация" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "demo:operator-routing",
+      "name": "Demo | Маршрутизация к оператору",
+      "fields": [
+        {
+          "type": "checkbox",
+          "name": "category",
+          "title": "Категория",
+          "options": [
+            { "title": "Продажа", "value": "Продажа" },
+            { "title": "Компенсация", "value": "Компенсация" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "demo:service-status",
+      "name": "Demo | Статус услуги",
+      "fields": [
+        {
+          "type": "checkbox",
+          "name": "category",
+          "title": "Категория",
+          "options": [
+            { "title": "Продажа", "value": "Продажа" },
+            { "title": "Компенсация", "value": "Компенсация" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "demo:closing",
+      "name": "Demo | Завершение диалога",
+      "fields": [
+        {
+          "type": "checkbox",
+          "name": "category",
+          "title": "Категория",
+          "options": [
+            { "title": "Продажа", "value": "Продажа" },
+            { "title": "Компенсация", "value": "Компенсация" }
+          ]
+        }
+      ]
+    }
+  ]
+}

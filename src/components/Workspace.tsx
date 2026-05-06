@@ -93,6 +93,8 @@ export function Workspace() {
     activeMarkIndex,
     markNavigationRequest,
     draftSelection,
+    isDevelopmentMode,
+    isProgressToolEnabled,
     setDraftSelection,
     marks,
     removeMark,
@@ -119,6 +121,8 @@ export function Workspace() {
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_MESSAGES);
   const [messageScrollRequest, setMessageScrollRequest] = useState<MessageScrollRequest | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [canScrollTop, setCanScrollTop] = useState(false);
+  const [canScrollBottom, setCanScrollBottom] = useState(false);
 
   const displayedRows = isEditingText ? editableRows : csvRows;
   const visibleRows = displayedRows.slice(0, visibleCount);
@@ -152,6 +156,15 @@ export function Workspace() {
       .map((row, index) => ({ row, index }))
       .filter(({ row }) => isRoleAllowedForSegmentation(row.usertype) && !markedMessageIds.has(row.messageid));
   }, [displayedRows, isRoleAllowedForSegmentation, markedMessageIds]);
+  const markingProgressPercent = useMemo(() => {
+    if (segmentationProgress.availableMessages === 0) {
+      return 0;
+    }
+
+    const progress = (segmentationProgress.markedMessages / segmentationProgress.availableMessages) * 100;
+
+    return Math.min(100, Math.max(0, Math.round(progress)));
+  }, [segmentationProgress.availableMessages, segmentationProgress.markedMessages]);
 
   const requestMessageScroll = useCallback((messageId: string) => {
     pendingScrollMessageIdRef.current = messageId;
@@ -160,6 +173,35 @@ export function Workspace() {
       requestId: (currentRequest?.requestId ?? 0) + 1,
     }));
   }, []);
+
+  const updateScrollControlState = useCallback(() => {
+    const container = messagesRef.current;
+
+    if (!container) {
+      setCanScrollTop(false);
+      setCanScrollBottom(false);
+      return;
+    }
+
+    setCanScrollTop(container.scrollTop > 20);
+    setCanScrollBottom(container.scrollTop + container.clientHeight < container.scrollHeight - 20);
+  }, []);
+
+  const scrollToDialogTop = () => {
+    messagesRef.current?.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    });
+  };
+
+  const scrollToDialogBottom = () => {
+    const container = messagesRef.current;
+
+    container?.scrollTo({
+      top: container.scrollHeight,
+      behavior: 'smooth',
+    });
+  };
 
   const getAllowedSegmentationBoundsForMark = useCallback((markIndex: number) => {
     const targetMark = marks[markIndex];
@@ -254,7 +296,8 @@ export function Workspace() {
 
     container.scrollTop = Math.min(pendingScrollTop, container.scrollHeight - container.clientHeight);
     pendingMessagesScrollTopRef.current = null;
-  }, [isEditingText]);
+    updateScrollControlState();
+  }, [isEditingText, updateScrollControlState]);
 
   useEffect(() => {
     const handleDocumentMouseDown = (event: globalThis.MouseEvent) => {
@@ -308,7 +351,12 @@ export function Workspace() {
         Math.max(INITIAL_VISIBLE_MESSAGES, currentVisibleCount),
       ),
     );
-  }, [displayedRows.length]);
+    requestAnimationFrame(updateScrollControlState);
+  }, [displayedRows.length, updateScrollControlState]);
+
+  useEffect(() => {
+    requestAnimationFrame(updateScrollControlState);
+  }, [displayedRows.length, updateScrollControlState, visibleCount]);
 
   useEffect(() => {
     if (!markNavigationRequest || markNavigationRequest.requestId === lastNavigationRequestIdRef.current) {
@@ -370,6 +418,7 @@ export function Workspace() {
         top: Math.max(0, centeredScrollTop),
         behavior: 'smooth',
       });
+      requestAnimationFrame(updateScrollControlState);
       setHighlightedMessageId(targetMessageId);
 
       if (highlightTimeoutRef.current !== null) {
@@ -389,6 +438,7 @@ export function Workspace() {
     const container = messagesRef.current;
 
     setDeleteOverlay(null);
+    updateScrollControlState();
 
     if (!container || visibleCount >= displayedRows.length) {
       return;
@@ -409,6 +459,7 @@ export function Workspace() {
     setVisibleCount((currentVisibleCount) =>
       Math.min(displayedRows.length, currentVisibleCount + VISIBLE_MESSAGES_STEP),
     );
+    requestAnimationFrame(updateScrollControlState);
   };
 
   const getCurrentMessageIndex = () => {
@@ -763,13 +814,39 @@ export function Workspace() {
           <button type="button" className={styles.editButton} onClick={handleEditToggle}>
             {isEditingText ? 'Сохранить' : 'Редактировать текст'}
           </button>
-          <button type="button" className={styles.resultButton} onClick={() => setIsResultOpen(true)}>
-            Показать результат
-          </button>
+          {isDevelopmentMode ? (
+            <button type="button" className={styles.resultButton} onClick={() => setIsResultOpen(true)}>
+              Показать результат
+            </button>
+          ) : null}
           <span className={styles.badge}>Сообщений: {csvRows.length}</span>
           <span className={styles.badge}>Разметка ролей: {allowedRolesForSegmentation.join(', ')}</span>
           {error ? <span className={styles.errorBadge}>Ошибка: {error}</span> : null}
         </div>
+
+        {isProgressToolEnabled ? (
+          <div className={styles.progressOverview}>
+            <div className={styles.progressOverviewHeader}>
+              <div>
+                <h2 className={styles.progressOverviewTitle}>Прогресс разметки</h2>
+                <p className={styles.progressOverviewText}>
+                  Размечено {markingProgressPercent}% доступных реплик
+                </p>
+              </div>
+              <strong className={styles.progressOverviewPercent}>{markingProgressPercent}%</strong>
+            </div>
+            <div
+              className={styles.progressTrack}
+              role="progressbar"
+              aria-label="Прогресс разметки"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={markingProgressPercent}
+            >
+              <div className={styles.progressFill} style={{ width: `${markingProgressPercent}%` }} />
+            </div>
+          </div>
+        ) : null}
 
         <div className={styles.progressBlock}>
           <div className={styles.progressItem}>
@@ -899,6 +976,33 @@ export function Workspace() {
             );
           })}
         </div>
+
+        {(canScrollTop || canScrollBottom) ? (
+          <div className={styles.scrollControls} aria-label="Быстрая прокрутка диалога">
+            {canScrollTop ? (
+              <button
+                type="button"
+                className={styles.scrollControlButton}
+                onClick={scrollToDialogTop}
+                aria-label="Прокрутить к началу диалога"
+                title="К началу диалога"
+              >
+                ↑
+              </button>
+            ) : null}
+            {canScrollBottom ? (
+              <button
+                type="button"
+                className={styles.scrollControlButton}
+                onClick={scrollToDialogBottom}
+                aria-label="Прокрутить к концу диалога"
+                title="К концу диалога"
+              >
+                ↓
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </section>
       {deleteOverlay
         ? createPortal(

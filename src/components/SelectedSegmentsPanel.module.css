@@ -23,6 +23,29 @@
   color: #111827;
 }
 
+.segmentsSummary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: #eff6ff;
+}
+
+.segmentsSummaryValue {
+  color: #1d4ed8;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.segmentsSummaryLabel {
+  color: #1e3a8a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .controls {
   position: relative;
   display: flex;

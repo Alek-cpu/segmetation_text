@@ -37,6 +37,7 @@ export function SelectedSegmentsPanel() {
     marks,
     entities,
     draftSelection,
+    isProgressToolEnabled,
     globalHidden,
     activeMarkIndex,
     removeMark,
@@ -226,6 +227,12 @@ export function SelectedSegmentsPanel() {
       <aside className={styles.panel}>
         <div className={styles.header}>
           <h2 className={styles.title}>Выбранные сегменты</h2>
+          {isProgressToolEnabled ? (
+            <div className={styles.segmentsSummary} aria-label={`Сегментов выбрано: ${marks.length}`}>
+              <strong className={styles.segmentsSummaryValue}>{marks.length}</strong>
+              <span className={styles.segmentsSummaryLabel}>сегментов выбрано</span>
+            </div>
+          ) : null}
         </div>
 
         <div className={styles.controls}>

@@ -118,8 +118,13 @@ export function getGlobalOffsetFromPoint(params: {
 }
 
 function getCaretPosition(clientX: number, clientY: number): { offsetNode: Node; offset: number } | null {
-  if ('caretPositionFromPoint' in document) {
-    const caretPosition = document.caretPositionFromPoint(clientX, clientY);
+  const documentWithCaret = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+
+  if (typeof documentWithCaret.caretPositionFromPoint === 'function') {
+    const caretPosition = documentWithCaret.caretPositionFromPoint(clientX, clientY);
 
     if (!caretPosition) {
       return null;
@@ -131,8 +136,8 @@ function getCaretPosition(clientX: number, clientY: number): { offsetNode: Node;
     };
   }
 
-  if ('caretRangeFromPoint' in document) {
-    const caretRange = document.caretRangeFromPoint(clientX, clientY);
+  if (typeof documentWithCaret.caretRangeFromPoint === 'function') {
+    const caretRange = documentWithCaret.caretRangeFromPoint(clientX, clientY);
 
     if (!caretRange) {
       return null;

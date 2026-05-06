@@ -1,0 +1,13 @@
+ID,communicationid,stepid,chatid,messageid,usertype,sentat,text
+demo_001,demo-communication,demo-step-001,demo-chat,demo-msg-001,CUSTOMER,2026-03-03 10:00:00.000000+03,"Здравствуйте! Хочу уточнить условия по тарифу для бизнеса."
+demo_002,demo-communication,demo-step-001,demo-chat,demo-msg-002,VIRTUAL_ASSISTANT,2026-03-03 10:00:05.000000+03,"Здравствуйте! Подскажите, какой тариф вас интересует?"
+demo_003,demo-communication,demo-step-001,demo-chat,demo-msg-003,CUSTOMER,2026-03-03 10:00:18.000000+03,"Нужен тариф с эквайрингом и понятной комиссией."
+demo_004,demo-communication,demo-step-002,demo-chat,demo-msg-004,VIRTUAL_ASSISTANT,2026-03-03 10:00:25.000000+03,"Передам вопрос специалисту, чтобы проверить актуальные условия."
+demo_005,demo-communication,demo-step-002,demo-chat,demo-msg-005,OPERATOR,2026-03-03 10:01:10.000000+03,"Добрый день! Я посмотрю доступные варианты для вашей организации."
+demo_006,demo-communication,demo-step-002,demo-chat,demo-msg-006,CUSTOMER,2026-03-03 10:01:42.000000+03,"Еще интересует, можно ли получить компенсацию комиссии."
+demo_007,demo-communication,demo-step-003,demo-chat,demo-msg-007,OPERATOR,2026-03-03 10:02:12.000000+03,"Компенсация возможна при выполнении условий акции. Сейчас перечислю основные требования."
+demo_008,demo-communication,demo-step-003,demo-chat,demo-msg-008,OPERATOR,2026-03-03 10:02:50.000000+03,"Нужно проверить оборот, налоговый статус и счет зачисления."
+demo_009,demo-communication,demo-step-004,demo-chat,demo-msg-009,CUSTOMER,2026-03-03 10:03:14.000000+03,"Понял, спасибо. Где можно посмотреть статус заявки?"
+demo_010,demo-communication,demo-step-004,demo-chat,demo-msg-010,VIRTUAL_ASSISTANT,2026-03-03 10:03:25.000000+03,"Статус можно проверить в личном кабинете в разделе истории операций."
+demo_011,demo-communication,demo-step-005,demo-chat,demo-msg-011,OPERATOR,2026-03-03 10:04:00.000000+03,"Если будут вопросы по условиям, напишите в этот чат."
+demo_012,demo-communication,demo-step-005,demo-chat,demo-msg-012,CUSTOMER,2026-03-03 10:04:20.000000+03,"Спасибо, больше вопросов нет."
