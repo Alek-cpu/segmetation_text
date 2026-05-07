@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { PANEL_MAX_WIDTH, PANEL_MIN_WIDTH } from '../utils/constants';
+import { clampPanelWidth } from '../utils/panelWidths';
 import { EntitiesPanel } from './EntitiesPanel';
 import { Resizer } from './Resizer';
 import { SelectedSegmentsPanel } from './SelectedSegmentsPanel';
@@ -21,11 +21,11 @@ export function MainLayout() {
 
     const handleMouseMove = (event: MouseEvent) => {
       if (resizeSide === 'left') {
-        setLeftPanelWidth(clampWidth(event.clientX - 16));
+        setLeftPanelWidth(clampPanelWidth(event.clientX - 16));
         return;
       }
 
-      setRightPanelWidth(clampWidth(window.innerWidth - event.clientX - 16));
+      setRightPanelWidth(clampPanelWidth(window.innerWidth - event.clientX - 16));
     };
 
     const handleMouseUp = () => {
@@ -59,8 +59,4 @@ export function MainLayout() {
       </section>
     </main>
   );
-}
-
-function clampWidth(width: number) {
-  return Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, width));
 }

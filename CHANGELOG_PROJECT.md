@@ -1,6 +1,32 @@
 # CHANGELOG PROJECT
 
 ### Update log
+- Date: 2026-05-06
+- What was analyzed: `Workspace.tsx`, `AppContext.tsx`, `utils/marks.ts`, `utils/messageMarks.ts`, `utils/selection.ts`, edit-mode save flow and marked text rendering.
+- What was added/updated in context: fixed the crash after saving a heavily shortened reply by hardening mark normalization after text edits, clamping message text parts during rendering and remounting plain `contentEditable` rows separately from view-mode marked spans.
+- Cause: old marks could collapse to empty/out-of-bounds local ranges after a reply was shortened to one character, and edit mode also kept React-managed `<span>` trees inside a browser-mutated `contentEditable`, which could produce `NotFoundError` during React commit.
+- Notes: one-character replies remain valid; fully empty/whitespace-only replies are still blocked before save; invalid marks are removed or rebuilt from valid clamped ranges; `npm run build` passes with the existing Vite chunk-size warning.
+
+- Date: 2026-05-06
+- What was analyzed: `PROJECT_CONTEXT.md`, `CODEX_RULES.md`, `Workspace.tsx`, `Workspace.module.css`, `AppContext.tsx` and the current inline edit/save flow.
+- What was added/updated in context: `Workspace` now validates current edit-mode rows before calling `saveEditedRows`; saving is blocked if any reply is empty after `trim()`, with a visible error message and highlighted invalid reply.
+- Notes: the user remains in edit mode until all replies contain at least one non-whitespace character; `AppContext`, marks shape, selection, resize and overlap logic were not changed; `npm run build` passes with the existing Vite chunk-size warning.
+
+- Date: 2026-05-06
+- What was analyzed: `PROJECT_CONTEXT.md`, `CODEX_RULES.md` and the entity-change button in `SelectedSegmentsPanel.tsx`.
+- What was added/updated in context: UI-only change replacing the entity-change glyph with a compact inline SVG circular refresh/replace icon and updating the tooltip text to `Сменить класс`.
+- Notes: entity-change handlers, `AppContext`, marks shape and segment logic were not changed.
+
+- Date: 2026-05-06
+- What was analyzed: `PROJECT_CONTEXT.md`, `CODEX_RULES.md`, `SelectedSegmentsPanel.tsx`, `SelectedSegmentsPanel.module.css`, `AppContext.tsx`, `types/app.ts` and existing right-panel portal popup patterns.
+- What was added/updated in context: right-panel segment text previews now detect overflow and support per-mark `Показать еще` / `Свернуть`; existing marks can change `entityId` through a searchable portal entity picker backed by the new `updateMarkEntity(markIndex, entityId)` context action.
+- Notes: entity changes preserve segment text, offsets, `selectedSegment` and existing fields; sorted/filtered rendering uses the source `markIndex`; `npm run build` passes with the existing Vite chunk-size warning.
+
+- Date: 2026-05-06
+- What was analyzed: `PROJECT_CONTEXT.md`, `CODEX_RULES.md`, `MainLayout.tsx`, `AppContext.tsx`, layout styles and panel width constants.
+- What was added/updated in context: panel width state now initializes from safe `localStorage` reads and persists left/right sidebar widths under `tagme-segmentation-left-panel-width` and `tagme-segmentation-right-panel-width`; documented the persisted layout behavior and width constraints.
+- Notes: invalid, missing or unavailable `localStorage` values fall back safely and all applied values are clamped to `260-460px`; `resetState` does not clear saved layout widths; `npm run build` passes with the existing Vite chunk-size warning.
+
 - Date: 2026-04-28
 - What was analyzed: direct `tmAPI.task.premarkup` flow, source logging and fallback from empty `marks` to `segments` in premarkup normalization.
 - What was added/updated in context: `getTagMePremarkup()` now explicitly logs premarkup source and reads `task.premarkup` before `task.data.premarkup` / `task.data.answer`; `normalizePremarkupMarks()` uses `segments` when `marks` is absent or empty.

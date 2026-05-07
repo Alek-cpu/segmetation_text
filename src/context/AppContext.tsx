@@ -1,12 +1,15 @@
 import Papa from 'papaparse';
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
+  type Dispatch,
   type PropsWithChildren,
+  type SetStateAction,
 } from 'react';
 import type { CsvRow, DraftSelection, Entity, Mark, MessageOffset } from '../types/app';
 import {
@@ -28,6 +31,13 @@ import type { TagMeRoleRules, TagMeSubmitResult } from '../integrations/tagme/ta
 import { getEmptyDraftSelection } from '../utils/selection';
 import { getPremarkupMarksCandidateCount, normalizePremarkupMarks } from '../utils/premarkup';
 import { LEFT_SIDEBAR_WIDTH, RIGHT_SIDEBAR_WIDTH } from '../utils/constants';
+import {
+  LEFT_PANEL_WIDTH_STORAGE_KEY,
+  RIGHT_PANEL_WIDTH_STORAGE_KEY,
+  clampPanelWidth,
+  getStoredPanelWidth,
+  savePanelWidth,
+} from '../utils/panelWidths';
 import {
   buildMarkRangePayload,
   createMark,
@@ -75,6 +85,7 @@ type AppContextValue = {
   toggleMarkVisibility: (markIndex: number) => void;
   updateMarkRange: (params: { markIndex: number; start: number; finish: number }) => boolean;
   saveEditedRows: (rows: CsvRow[]) => void;
+  updateMarkEntity: (params: { markIndex: number; entityId: string }) => void;
   updateMarkFieldValue: (params: {
     markIndex: number;
     fieldName: string;
@@ -148,8 +159,12 @@ export function AppProvider({ children }: PropsWithChildren) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [globalHidden, setGlobalHidden] = useState(false);
-  const [leftPanelWidth, setLeftPanelWidth] = useState(LEFT_SIDEBAR_WIDTH);
-  const [rightPanelWidth, setRightPanelWidth] = useState(RIGHT_SIDEBAR_WIDTH);
+  const [leftPanelWidth, setLeftPanelWidthState] = useState(() =>
+    getStoredPanelWidth(LEFT_PANEL_WIDTH_STORAGE_KEY, LEFT_SIDEBAR_WIDTH),
+  );
+  const [rightPanelWidth, setRightPanelWidthState] = useState(() =>
+    getStoredPanelWidth(RIGHT_PANEL_WIDTH_STORAGE_KEY, RIGHT_SIDEBAR_WIDTH),
+  );
   const [marks, setMarks] = useState<Mark[]>([]);
   const [activeMarkIndex, setActiveMarkIndex] = useState<number | null>(null);
   const [markNavigationRequest, setMarkNavigationRequest] = useState<{ markIndex: number; requestId: number } | null>(null);
@@ -168,6 +183,31 @@ export function AppProvider({ children }: PropsWithChildren) {
     marks: [],
     source: tagMeSourceRef.current,
   }));
+
+  const setStoredPanelWidth = useCallback((
+    value: number,
+    setPanelWidth: Dispatch<SetStateAction<number>>,
+    storageKey: string,
+  ) => {
+    setPanelWidth((currentWidth) => {
+      const nextWidth = clampPanelWidth(value);
+
+      if (nextWidth === currentWidth) {
+        return currentWidth;
+      }
+
+      savePanelWidth(storageKey, nextWidth);
+      return nextWidth;
+    });
+  }, []);
+
+  const setLeftPanelWidth = useCallback((value: number) => {
+    setStoredPanelWidth(value, setLeftPanelWidthState, LEFT_PANEL_WIDTH_STORAGE_KEY);
+  }, [setStoredPanelWidth]);
+
+  const setRightPanelWidth = useCallback((value: number) => {
+    setStoredPanelWidth(value, setRightPanelWidthState, RIGHT_PANEL_WIDTH_STORAGE_KEY);
+  }, [setStoredPanelWidth]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -569,18 +609,42 @@ export function AppProvider({ children }: PropsWithChildren) {
         });
 
         const nextFullPlainText = rows.map((row) => row.text ?? '').join('\n');
+        const nextMarks = rebuildMarksAfterTextEdit({
+          marks,
+          previousRows: csvRows,
+          rows,
+          messageOffsets: nextMessageOffsets,
+          fullPlainText: nextFullPlainText,
+        });
 
         setCsvRows(rows);
+        setMarks(nextMarks);
+        setActiveMarkIndex((currentIndex) => {
+          if (currentIndex === null) {
+            return null;
+          }
+
+          return nextMarks.length === marks.length && currentIndex < nextMarks.length ? currentIndex : null;
+        });
+        setError(null);
+      },
+      updateMarkEntity: ({ markIndex, entityId }) => {
+        if (!entities.some((entity) => entity.id === entityId)) {
+          return;
+        }
+
         setMarks(
-          rebuildMarksAfterTextEdit({
-            marks,
-            previousRows: csvRows,
-            rows,
-            messageOffsets: nextMessageOffsets,
-            fullPlainText: nextFullPlainText,
+          marks.map((mark, index) => {
+            if (index !== markIndex || mark.entityId === entityId) {
+              return mark;
+            }
+
+            return {
+              ...mark,
+              entityId,
+            };
           }),
         );
-        setError(null);
       },
       updateMarkFieldValue: ({ markIndex, fieldName, optionValue, checked }) => {
         setMarks(
@@ -618,8 +682,8 @@ export function AppProvider({ children }: PropsWithChildren) {
         setLoading(false);
         setError(null);
         setGlobalHidden(false);
-        setLeftPanelWidth(LEFT_SIDEBAR_WIDTH);
-        setRightPanelWidth(RIGHT_SIDEBAR_WIDTH);
+        setLeftPanelWidthState(getStoredPanelWidth(LEFT_PANEL_WIDTH_STORAGE_KEY, LEFT_SIDEBAR_WIDTH));
+        setRightPanelWidthState(getStoredPanelWidth(RIGHT_PANEL_WIDTH_STORAGE_KEY, RIGHT_SIDEBAR_WIDTH));
         setMarks([]);
         setActiveMarkIndex(null);
         setMarkNavigationRequest(null);

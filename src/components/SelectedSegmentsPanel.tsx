@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -31,6 +32,9 @@ const SORT_MENU_WIDTH = 180;
 const SORT_MENU_HEIGHT = 140;
 const FILTER_PANEL_WIDTH = 260;
 const FILTER_PANEL_HEIGHT = 540;
+const ENTITY_PICKER_WIDTH = 320;
+const ENTITY_PICKER_HEIGHT = 420;
+const ENTITY_PICKER_LIMIT = 80;
 
 export function SelectedSegmentsPanel() {
   const {
@@ -45,21 +49,30 @@ export function SelectedSegmentsPanel() {
     requestMarkNavigation,
     toggleGlobalMarksVisibility,
     toggleMarkVisibility,
+    updateMarkEntity,
     updateMarkFieldValue,
   } = useAppContext();
   const [expandedMarkIndex, setExpandedMarkIndex] = useState<number | null>(null);
+  const [expandedTextMarkIndexes, setExpandedTextMarkIndexes] = useState<Set<number>>(() => new Set());
+  const [overflowingTextMarkIndexes, setOverflowingTextMarkIndexes] = useState<Set<number>>(() => new Set());
   const [sortMode, setSortMode] = useState<SortMode>('newest');
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [entityPickerMarkIndex, setEntityPickerMarkIndex] = useState<number | null>(null);
+  const [entitySearchQuery, setEntitySearchQuery] = useState('');
   const [isDraftSelectionExpanded, setIsDraftSelectionExpanded] = useState(false);
   const [filteredEntityIds, setFilteredEntityIds] = useState<string[]>([]);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [sortMenuPosition, setSortMenuPosition] = useState<PopupPosition | null>(null);
   const [filterPanelPosition, setFilterPanelPosition] = useState<PopupPosition | null>(null);
+  const [entityPickerPosition, setEntityPickerPosition] = useState<PopupPosition | null>(null);
   const sortButtonRef = useRef<HTMLButtonElement | null>(null);
   const filterButtonRef = useRef<HTMLButtonElement | null>(null);
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const filterPanelRef = useRef<HTMLDivElement | null>(null);
+  const entityPickerRef = useRef<HTMLDivElement | null>(null);
+  const entitySearchInputRef = useRef<HTMLInputElement | null>(null);
+  const markTextRefs = useRef(new Map<number, HTMLParagraphElement>());
 
   const marksWithIndex = useMemo(() => {
     return marks.map((mark, index) => ({ mark, index }));
@@ -93,6 +106,20 @@ export function SelectedSegmentsPanel() {
     });
   }, [entities, marks]);
 
+  const entityPickerOptions = useMemo(() => {
+    const normalizedQuery = entitySearchQuery.trim().toLowerCase();
+    const nextEntities = normalizedQuery
+      ? entities.filter((entity) => {
+          const normalizedName = entity.name.toLowerCase();
+          const normalizedId = entity.id.toLowerCase();
+
+          return normalizedName.includes(normalizedQuery) || normalizedId.includes(normalizedQuery);
+        })
+      : entities;
+
+    return nextEntities.slice(0, ENTITY_PICKER_LIMIT);
+  }, [entities, entitySearchQuery]);
+
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -114,6 +141,14 @@ export function SelectedSegmentsPanel() {
       ) {
         setIsFilterOpen(false);
       }
+
+      if (
+        entityPickerMarkIndex !== null &&
+        entityPickerRef.current &&
+        !entityPickerRef.current.contains(target)
+      ) {
+        closeEntityPicker();
+      }
     };
 
     document.addEventListener('mousedown', handleDocumentClick);
@@ -121,7 +156,23 @@ export function SelectedSegmentsPanel() {
     return () => {
       document.removeEventListener('mousedown', handleDocumentClick);
     };
-  }, [isFilterOpen, isSortMenuOpen]);
+  }, [entityPickerMarkIndex, isFilterOpen, isSortMenuOpen]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeEntityPicker();
+        setIsSortMenuOpen(false);
+        setIsFilterOpen(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   useEffect(() => {
     const handleScroll = (event: Event) => {
@@ -129,7 +180,8 @@ export function SelectedSegmentsPanel() {
 
       if (
         (filterPanelRef.current && target && filterPanelRef.current.contains(target)) ||
-        (sortMenuRef.current && target && sortMenuRef.current.contains(target))
+        (sortMenuRef.current && target && sortMenuRef.current.contains(target)) ||
+        (entityPickerRef.current && target && entityPickerRef.current.contains(target))
       ) {
         return;
       }
@@ -137,12 +189,14 @@ export function SelectedSegmentsPanel() {
       setTooltip(null);
       setIsSortMenuOpen(false);
       setIsFilterOpen(false);
+      closeEntityPicker();
     };
 
     const handleResize = () => {
       setTooltip(null);
       setIsSortMenuOpen(false);
       setIsFilterOpen(false);
+      closeEntityPicker();
     };
 
     window.addEventListener('scroll', handleScroll, true);
@@ -157,6 +211,27 @@ export function SelectedSegmentsPanel() {
   useEffect(() => {
     setIsDraftSelectionExpanded(false);
   }, [draftSelection.start, draftSelection.finish]);
+
+  useEffect(() => {
+    setExpandedTextMarkIndexes((currentIndexes) => {
+      const existingIndexes = new Set(marks.map((_, index) => index));
+      const nextIndexes = new Set([...currentIndexes].filter((markIndex) => existingIndexes.has(markIndex)));
+
+      return nextIndexes.size === currentIndexes.size ? currentIndexes : nextIndexes;
+    });
+  }, [marks]);
+
+  useLayoutEffect(() => {
+    const nextOverflowingIndexes = new Set<number>();
+
+    markTextRefs.current.forEach((element, markIndex) => {
+      if (element.scrollHeight > element.clientHeight + 1) {
+        nextOverflowingIndexes.add(markIndex);
+      }
+    });
+
+    setOverflowingTextMarkIndexes(nextOverflowingIndexes);
+  }, [sortedMarks, expandedTextMarkIndexes]);
 
   const toggleExpanded = (markIndex: number) => {
     setExpandedMarkIndex((currentIndex) => (currentIndex === markIndex ? null : markIndex));
@@ -183,6 +258,39 @@ export function SelectedSegmentsPanel() {
       height: FILTER_PANEL_HEIGHT,
     }));
     setIsFilterOpen((currentState) => !currentState);
+  };
+
+  const openEntityPicker = (event: ReactMouseEvent<HTMLButtonElement>, markIndex: number) => {
+    event.stopPropagation();
+    setEntityPickerPosition(getPopupPosition(event.currentTarget, {
+      width: ENTITY_PICKER_WIDTH,
+      height: ENTITY_PICKER_HEIGHT,
+    }));
+    setEntityPickerMarkIndex(markIndex);
+    setEntitySearchQuery('');
+    setIsSortMenuOpen(false);
+    setIsFilterOpen(false);
+  };
+
+  const closeEntityPicker = () => {
+    setEntityPickerMarkIndex(null);
+    setEntityPickerPosition(null);
+    setEntitySearchQuery('');
+  };
+
+  const toggleExpandedText = (event: ReactMouseEvent<HTMLButtonElement>, markIndex: number) => {
+    event.stopPropagation();
+    setExpandedTextMarkIndexes((currentIndexes) => {
+      const nextIndexes = new Set(currentIndexes);
+
+      if (nextIndexes.has(markIndex)) {
+        nextIndexes.delete(markIndex);
+      } else {
+        nextIndexes.add(markIndex);
+      }
+
+      return nextIndexes;
+    });
   };
 
   const toggleEntityFilter = (entityId: string, checked: boolean) => {
@@ -214,6 +322,12 @@ export function SelectedSegmentsPanel() {
   const hideTooltip = () => {
     setTooltip(null);
   };
+
+  useEffect(() => {
+    if (entityPickerMarkIndex !== null) {
+      entitySearchInputRef.current?.focus();
+    }
+  }, [entityPickerMarkIndex]);
 
   const getTooltipProps = () => ({
     onMouseEnter: showTooltip,
@@ -313,6 +427,9 @@ export function SelectedSegmentsPanel() {
           <div className={styles.list}>
             {sortedMarks.map(({ mark, index: markIndex }) => {
               const isVisible = !mark.hidden && (!globalHidden || mark.forceVisible);
+              const entityName = entities.find((entity) => entity.id === mark.entityId)?.name ?? mark.entityId;
+              const isTextExpanded = expandedTextMarkIndexes.has(markIndex);
+              const canExpandText = overflowingTextMarkIndexes.has(markIndex) || isTextExpanded;
 
               return (
                 <article
@@ -344,7 +461,41 @@ export function SelectedSegmentsPanel() {
                         aria-hidden="true"
                       />
                       <div className={styles.markMain}>
-                        <p className={styles.markEntity}>{entities.find((entity) => entity.id === mark.entityId)?.name ?? mark.entityId}</p>
+                        <div className={styles.markEntityRow}>
+                          <p className={styles.markEntity}>{entityName}</p>
+                          <button
+                            type="button"
+                            className={styles.changeEntityButton}
+                            onClick={(event) => openEntityPicker(event, markIndex)}
+                            aria-label="Сменить класс сегмента"
+                            data-tooltip="Сменить класс"
+                            {...getTooltipProps()}
+                          >
+                            <svg
+                              className={styles.changeEntityIcon}
+                              viewBox="0 0 16 16"
+                              aria-hidden="true"
+                              focusable="false"
+                            >
+                              <path
+                                d="M13.25 5.25A5.7 5.7 0 0 0 8 2a5.5 5.5 0 1 0 4.35 8.86"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="1.6"
+                              />
+                              <path
+                                d="M13.25 2.75v2.5h-2.5"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth="1.6"
+                              />
+                            </svg>
+                          </button>
+                        </div>
                         <p className={styles.markMeta}>
                           {mark.position.start} - {mark.position.finish}
                         </p>
@@ -398,7 +549,30 @@ export function SelectedSegmentsPanel() {
                     </div>
                   </div>
 
-                  <p className={styles.markText}>{mark.text}</p>
+                  <div className={styles.markTextBlock}>
+                    <p
+                      ref={(element) => {
+                        if (element) {
+                          markTextRefs.current.set(markIndex, element);
+                        } else {
+                          markTextRefs.current.delete(markIndex);
+                        }
+                      }}
+                      className={`${styles.markText} ${isTextExpanded ? styles.markTextExpanded : ''}`}
+                    >
+                      {mark.text}
+                    </p>
+                    {canExpandText ? (
+                      <button
+                        type="button"
+                        className={styles.markTextToggle}
+                        onClick={(event) => toggleExpandedText(event, markIndex)}
+                        aria-expanded={isTextExpanded}
+                      >
+                        {isTextExpanded ? 'Свернуть' : 'Показать еще'}
+                      </button>
+                    ) : null}
+                  </div>
 
                   {expandedMarkIndex === markIndex ? (
                     <div className={styles.markFields}>
@@ -494,6 +668,58 @@ export function SelectedSegmentsPanel() {
                     <span>{entity.name}</span>
                   </label>
                 ))}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+      {entityPickerMarkIndex !== null && entityPickerPosition
+        ? createPortal(
+            <div
+              ref={entityPickerRef}
+              className={styles.entityPicker}
+              style={{
+                position: 'fixed',
+                top: entityPickerPosition.top,
+                left: entityPickerPosition.left,
+              }}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <label className={styles.entityPickerSearch}>
+                <span className={styles.entityPickerLabel}>Entity</span>
+                <input
+                  ref={entitySearchInputRef}
+                  type="text"
+                  value={entitySearchQuery}
+                  onChange={(event) => setEntitySearchQuery(event.target.value)}
+                  className={styles.entityPickerInput}
+                  placeholder="Поиск по id или name"
+                />
+              </label>
+              <div className={styles.entityPickerList}>
+                {entityPickerOptions.map((entity) => (
+                  <button
+                    key={entity.id}
+                    type="button"
+                    className={`${styles.entityPickerOption} ${
+                      marks[entityPickerMarkIndex]?.entityId === entity.id ? styles.entityPickerOptionActive : ''
+                    }`}
+                    onClick={() => {
+                      updateMarkEntity({
+                        markIndex: entityPickerMarkIndex,
+                        entityId: entity.id,
+                      });
+                      closeEntityPicker();
+                    }}
+                  >
+                    <span className={styles.entityPickerOptionName}>{entity.name}</span>
+                    <span className={styles.entityPickerOptionId}>{entity.id}</span>
+                  </button>
+                ))}
+
+                {entityPickerOptions.length === 0 ? (
+                  <div className={styles.entityPickerEmpty}>Ничего не найдено</div>
+                ) : null}
               </div>
             </div>,
             document.body,

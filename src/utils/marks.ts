@@ -70,7 +70,8 @@ export function buildMarkRangePayload(params: {
       messageId: item.messageId,
       start: Math.max(0, start - item.start),
       finish: Math.min(item.text.length, finish - item.start),
-    }));
+    }))
+    .filter((range) => range.start < range.finish);
 
   return {
     position: {
@@ -90,31 +91,48 @@ export function rebuildMarksAfterTextEdit(params: {
   messageOffsets: MessageOffset[];
   fullPlainText: string;
 }): Mark[] {
+  const previousTextByMessageId = new Map(
+    params.previousRows.map((row) => [row.messageid, row.text ?? '']),
+  );
+  const textByMessageId = new Map(
+    params.rows.map((row) => [row.messageid, row.text ?? '']),
+  );
+  const offsetByMessageId = new Map(
+    params.messageOffsets.map((offset) => [offset.messageId, offset]),
+  );
+
   return params.marks.flatMap((mark) => {
     const rebuiltRanges = mark.messageRanges
       .map((range) => {
-        const previousRow = params.previousRows.find((item) => item.messageid === range.messageId);
-        const row = params.rows.find((item) => item.messageid === range.messageId);
-        const offset = params.messageOffsets.find((item) => item.messageId === range.messageId);
+        const previousText = previousTextByMessageId.get(range.messageId);
+        const text = textByMessageId.get(range.messageId);
+        const offset = offsetByMessageId.get(range.messageId);
 
-        if (!previousRow || !row || !offset) {
+        if (previousText === undefined || text === undefined || !offset) {
           return null;
         }
 
-        const maxLength = row.text.length;
-        const lengthDelta = row.text.length - previousRow.text.length;
-        const nextStart = Math.min(range.start, maxLength);
-        const nextFinish = Math.max(nextStart, Math.min(range.finish + lengthDelta, maxLength));
+        const maxLength = text.length;
+        const lengthDelta = text.length - previousText.length;
+        const nextStart = clampRangeOffset(range.start, maxLength);
+        const nextFinish = clampRangeOffset(range.finish + lengthDelta, maxLength);
+        const start = Math.min(nextStart, nextFinish);
+        const finish = Math.max(nextStart, nextFinish);
+
+        if (start >= finish) {
+          return null;
+        }
 
         return {
           messageId: range.messageId,
-          start: nextStart,
-          finish: nextFinish,
-          globalStart: offset.start + nextStart,
-          globalFinish: offset.start + nextFinish,
+          start,
+          finish,
+          globalStart: offset.start + start,
+          globalFinish: offset.start + finish,
         };
       })
-      .filter((item): item is NonNullable<typeof item> => item !== null);
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .sort((left, right) => left.globalStart - right.globalStart);
 
     if (rebuiltRanges.length === 0) {
       return [];
@@ -122,25 +140,32 @@ export function rebuildMarksAfterTextEdit(params: {
 
     const start = rebuiltRanges[0].globalStart;
     const finish = rebuiltRanges[rebuiltRanges.length - 1].globalFinish;
-    const nextText = params.fullPlainText.slice(start, finish);
+    const nextPayload = buildMarkRangePayload({
+      start,
+      finish,
+      fullPlainText: params.fullPlainText,
+      messageOffsets: params.messageOffsets,
+    });
 
-    if (nextText.length === 0) {
+    if (
+      nextPayload.position.start >= nextPayload.position.finish ||
+      nextPayload.text.length === 0 ||
+      nextPayload.messageRanges.length === 0
+    ) {
       return [];
     }
 
     return [{
       ...mark,
-      position: {
-        start,
-        finish,
-      },
-      text: nextText,
-      selectedSegment: rebuiltRanges.map((item) => item.messageId),
-      messageRanges: rebuiltRanges.map(({ messageId, start: localStart, finish: localFinish }) => ({
-        messageId,
-        start: localStart,
-        finish: localFinish,
-      })),
+      ...nextPayload,
     }];
   });
+}
+
+function clampRangeOffset(offset: number, maxLength: number) {
+  if (!Number.isFinite(offset)) {
+    return 0;
+  }
+
+  return Math.min(maxLength, Math.max(0, offset));
 }

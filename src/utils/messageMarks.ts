@@ -35,14 +35,24 @@ export function buildMessageTextParts(
     .map((mark, markIndex) => ({ mark, markIndex }))
     .filter(({ markIndex }) => !visibleMarkIndexes || visibleMarkIndexes.has(markIndex))
     .filter(({ mark }) => mark.position.finish > messageOffset.start && mark.position.start < messageOffset.end)
-    .map<MessageMarkSegment>(({ mark, markIndex }) => ({
-      markIndex,
-      start: Math.max(mark.position.start, messageOffset.start),
-      finish: Math.min(mark.position.finish, messageOffset.end),
-      entityId: mark.entityId,
-      hasStartBorder: mark.position.start >= messageOffset.start,
-      hasEndBorder: mark.position.finish <= messageOffset.end,
-    }))
+    .map<MessageMarkSegment | null>(({ mark, markIndex }) => {
+      const start = clampMessageOffset(mark.position.start, messageOffset.start, messageOffset.end);
+      const finish = clampMessageOffset(mark.position.finish, messageOffset.start, messageOffset.end);
+
+      if (start >= finish) {
+        return null;
+      }
+
+      return {
+        markIndex,
+        start,
+        finish,
+        entityId: mark.entityId,
+        hasStartBorder: mark.position.start >= messageOffset.start,
+        hasEndBorder: mark.position.finish <= messageOffset.end,
+      };
+    })
+    .filter((segment): segment is MessageMarkSegment => segment !== null)
     .sort((left, right) => left.start - right.start);
 
   if (segments.length === 0) {
@@ -65,7 +75,15 @@ export function buildMessageTextParts(
       continue;
     }
 
-    const text = messageOffset.text.slice(start - messageOffset.start, finish - messageOffset.start);
+    const text = messageOffset.text.slice(
+      clampLocalOffset(start - messageOffset.start, messageOffset.text.length),
+      clampLocalOffset(finish - messageOffset.start, messageOffset.text.length),
+    );
+
+    if (text.length === 0) {
+      continue;
+    }
+
     const coveringSegments = segments.filter((segment) => segment.finish > start && segment.start < finish);
 
     if (coveringSegments.length === 0) {
@@ -109,6 +127,22 @@ export function buildMessageTextParts(
   }
 
   return parts.filter((part) => part.text.length > 0);
+}
+
+function clampMessageOffset(offset: number, min: number, max: number) {
+  if (!Number.isFinite(offset)) {
+    return min;
+  }
+
+  return Math.min(max, Math.max(min, offset));
+}
+
+function clampLocalOffset(offset: number, maxLength: number) {
+  if (!Number.isFinite(offset)) {
+    return 0;
+  }
+
+  return Math.min(maxLength, Math.max(0, offset));
 }
 
 function getOverlapColor(segments: MessageMarkSegment[], primarySegment: MessageMarkSegment) {

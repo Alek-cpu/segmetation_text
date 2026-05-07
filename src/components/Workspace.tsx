@@ -9,11 +9,12 @@ import {
   getEmptyDraftSelection,
   getGlobalOffsetFromPoint,
 } from '../utils/selection';
-import type { Mark } from '../types/app';
+import type { CsvRow, Mark } from '../types/app';
 
 const INITIAL_VISIBLE_MESSAGES = 25;
 const VISIBLE_MESSAGES_STEP = 25;
 const LOAD_MORE_SCROLL_THRESHOLD = 0.8;
+const EMPTY_MESSAGE_ERROR = 'Оставьте хотя бы один символ в каждой реплике';
 
 type DragState = {
   markIndex: number;
@@ -82,6 +83,10 @@ function buildWordChunks(parts: MessageTextPart[]): TextRenderChunk[] {
   return chunks;
 }
 
+function getEmptyEditableMessageIds(rows: CsvRow[]) {
+  return rows.filter((row) => (row.text ?? '').trim().length === 0).map((row) => row.messageid);
+}
+
 export function Workspace() {
   const {
     csvRows,
@@ -121,6 +126,8 @@ export function Workspace() {
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_MESSAGES);
   const [messageScrollRequest, setMessageScrollRequest] = useState<MessageScrollRequest | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [editValidationError, setEditValidationError] = useState<string | null>(null);
+  const [emptyEditableMessageIds, setEmptyEditableMessageIds] = useState<string[]>([]);
   const [canScrollTop, setCanScrollTop] = useState(false);
   const [canScrollBottom, setCanScrollBottom] = useState(false);
 
@@ -562,6 +569,18 @@ export function Workspace() {
     pendingMessagesScrollTopRef.current = messagesRef.current?.scrollTop ?? null;
 
     if (isEditingText) {
+      const emptyMessageIds = getEmptyEditableMessageIds(editableRowsRef.current);
+
+      if (emptyMessageIds.length > 0) {
+        setEditableRows(editableRowsRef.current);
+        setEditValidationError(EMPTY_MESSAGE_ERROR);
+        setEmptyEditableMessageIds(emptyMessageIds);
+        requestMessageScroll(emptyMessageIds[0]);
+        return;
+      }
+
+      setEditValidationError(null);
+      setEmptyEditableMessageIds([]);
       saveEditedRows(editableRowsRef.current);
       setEditableRows(editableRowsRef.current);
       setIsEditingText(false);
@@ -570,13 +589,26 @@ export function Workspace() {
 
     editableRowsRef.current = csvRows;
     setEditableRows(csvRows);
+    setEditValidationError(null);
+    setEmptyEditableMessageIds([]);
     setIsEditingText(true);
   };
 
   const updateEditableRowText = (messageId: string, text: string) => {
-    editableRowsRef.current = editableRowsRef.current.map((row) =>
+    const nextRows = editableRowsRef.current.map((row) =>
       row.messageid === messageId ? { ...row, text } : row,
     );
+    editableRowsRef.current = nextRows;
+
+    if (editValidationError) {
+      const emptyMessageIds = getEmptyEditableMessageIds(nextRows);
+      setEditableRows(nextRows);
+      setEmptyEditableMessageIds(emptyMessageIds);
+
+      if (emptyMessageIds.length === 0) {
+        setEditValidationError(null);
+      }
+    }
   };
 
   const handleResizeStart = (params: { markIndex: number; edge: 'start' | 'finish' }) => {
@@ -714,6 +746,10 @@ export function Workspace() {
     const { part, text, key, showStartBoundary, showEndBoundary } = renderPart;
     const isInteractive = options.interactive ?? true;
 
+    if (text.length === 0) {
+      return null;
+    }
+
     if (!part.isMarked) {
       return <span key={key}>{text}</span>;
     }
@@ -822,6 +858,7 @@ export function Workspace() {
           <span className={styles.badge}>Сообщений: {csvRows.length}</span>
           <span className={styles.badge}>Разметка ролей: {allowedRolesForSegmentation.join(', ')}</span>
           {error ? <span className={styles.errorBadge}>Ошибка: {error}</span> : null}
+          {editValidationError ? <span className={styles.errorBadge}>{editValidationError}</span> : null}
         </div>
 
         {isProgressToolEnabled ? (
@@ -901,6 +938,7 @@ export function Workspace() {
             const offset = messageOffsets[index];
             const isSelected = draftSelection.messageIds.includes(row.messageid);
             const isSegmentationAllowed = isRoleAllowedForSegmentation(row.usertype);
+            const isEditInvalid = emptyEditableMessageIds.includes(row.messageid);
             const messageParts = offset
               ? buildMessageTextParts(offset, previewMarks, activeMarkIndex, visibleMarkIndexes)
               : [];
@@ -913,6 +951,7 @@ export function Workspace() {
                   isSelected ? styles.messageRowSelected : '',
                   highlightedMessageId === row.messageid ? styles.messageRowScrollHighlight : '',
                   !isSegmentationAllowed ? styles.messageRowDisabled : '',
+                  isEditInvalid ? styles.messageRowInvalid : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
@@ -927,33 +966,21 @@ export function Workspace() {
                 <div className={styles.messageContent}>
                   {isEditingText ? (
                     <p
+                      key={`edit-${row.messageid}`}
                       className={[styles.messageText, styles.messageEditable].join(' ')}
                       contentEditable
                       role="textbox"
                       aria-label="Редактировать текст сообщения"
+                      aria-invalid={isEditInvalid}
                       suppressContentEditableWarning
                       onInput={(event) => {
                         updateEditableRowText(row.messageid, event.currentTarget.textContent ?? '');
                       }}
                     >
-                      {messageParts.length > 0
-                        ? buildWordChunks(messageParts).map((chunk, chunkIndex) => {
-                            const content = chunk.parts.map((part) => renderTextPart(part, { interactive: false }));
-
-                            if (chunk.type === 'space') {
-                              return content;
-                            }
-
-                            return (
-                              <span className={styles.wordChunk} key={`${row.messageid}-edit-word-${chunkIndex}`}>
-                                {content}
-                              </span>
-                            );
-                          })
-                        : row.text}
+                      {row.text}
                     </p>
                   ) : (
-                    <p className={styles.messageText} data-selectable-text="true">
+                    <p key={`view-${row.messageid}`} className={styles.messageText} data-selectable-text="true">
                       {messageParts.length > 0
                         ? buildWordChunks(messageParts).map((chunk, chunkIndex) => {
                             const content = chunk.parts.map((part) => renderTextPart(part));
